@@ -16,7 +16,8 @@ DMA_HandleTypeDef hdma_spi2_tx;
 SD_HandleTypeDef hsd;
 SPI_HandleTypeDef hspi1;
 
-#define AUDIO_TX_WORDS       4096U
+#define AUDIO_TX_WORDS       4096U   /* frames per half-buffer (46 ms @ 44100 Hz) */
+#define AUDIO_TX_WORDS_FULL  8192U   /* double buffer for circular DMA */
 #define SD_READ_BYTES        4096U
 
 #define DEBUG_LED_PORT       GPIOE
@@ -26,8 +27,8 @@ SPI_HandleTypeDef hspi1;
 #define DEBUG_LED3_PORT      GPIOD
 #define DEBUG_LED3_PIN       GPIO_PIN_13
 
-#define NUM_INSTRUMENTS      5U
-#define MAX_SAMPLE_FRAMES    5000U
+#define NUM_INSTRUMENTS      16U
+#define MAX_SAMPLE_FRAMES    3000U
 #define MAX_VOICES           10U
 
 #define DEMO_SAMPLE_RATE     44100U
@@ -52,6 +53,7 @@ SPI_HandleTypeDef hspi1;
 #define CMD_SEQ_VOLUME       0x11U
 #define CMD_LIVE_VOLUME      0x12U
 #define CMD_TRACK_VOLUME     0x13U
+#define CMD_LIVE_PITCH       0x14U
 
 #define CMD_FILTER_TYPE       0x20U
 #define CMD_FILTER_CUTOFF     0x21U
@@ -85,13 +87,14 @@ SPI_HandleTypeDef hspi1;
 #define CMD_COMP_MAKEUP      0x42U
 
 #define CMD_TRACK_FILTER     0x50U
-#define CMD_TRACK_CLEAR_FX   0x51U
+#define CMD_TRACK_CLEAR_FILTER 0x51U
 #define CMD_TRACK_DISTORTION 0x52U
 #define CMD_TRACK_BITCRUSH   0x53U
 #define CMD_TRACK_ECHO       0x54U
 #define CMD_TRACK_FLANGER_FX 0x55U
 #define CMD_TRACK_COMPRESSOR 0x56U
 #define CMD_TRACK_CLEAR_LIVE 0x57U
+#define CMD_TRACK_CLEAR_FX   0x58U
 
 #define CMD_SIDECHAIN_SET    0x90U
 #define CMD_SIDECHAIN_CLEAR  0x91U
@@ -103,7 +106,7 @@ SPI_HandleTypeDef hspi1;
 #define CMD_SAMPLE_UNLOAD_ALL 0xA4U
 
 #define CMD_PAD_FILTER       0x70U
-#define CMD_PAD_CLEAR_FX     0x71U
+#define CMD_PAD_CLEAR_FILTER 0x71U
 #define CMD_PAD_DISTORTION   0x72U
 #define CMD_PAD_BITCRUSH     0x73U
 #define CMD_PAD_LOOP         0x74U
@@ -112,6 +115,7 @@ SPI_HandleTypeDef hspi1;
 #define CMD_PAD_STUTTER      0x77U
 #define CMD_PAD_SCRATCH      0x78U
 #define CMD_PAD_TURNTABLISM  0x79U
+#define CMD_PAD_CLEAR_FX     0x7AU
 
 #define CMD_BULK_TRIGGERS    0xF0U
 #define CMD_BULK_FX          0xF1U
@@ -126,12 +130,14 @@ SPI_HandleTypeDef hspi1;
 #define SPI_TRIG_Q_LEN       16U
 #define SPI_MAX_PAYLOAD      600U
 #define SPI_TX_Q_LEN         768U
-#define TRACK_FX_BUF_SAMPLES 1024U
+#define TRACK_FX_BUF_SAMPLES 512U
 #define TRACK_PEAK_COUNT     16U
 
 static uint8_t  sdReadBuf[SD_READ_BYTES];
-static uint16_t i2sTxBufA[AUDIO_TX_WORDS];
-static uint16_t i2sTxBufB[AUDIO_TX_WORDS];
+static uint16_t i2sBuf[AUDIO_TX_WORDS_FULL]; /* double buffer circular I2S DMA */
+DMA_HandleTypeDef hdma_spi1_rx;             /* DMA2 Stream0 Ch3 para SPI1 RX */
+static volatile uint8_t g_audioFillHalf = 0xFFU; /* 0 = llenar 1ª mitad, 1 = 2ª mitad */
+static volatile uint32_t g_audioLastCbTick = 0U;
 
 typedef struct {
   uint32_t part_lba;
@@ -179,8 +185,8 @@ typedef struct {
 
 static InstrumentSample g_samples[NUM_INSTRUMENTS];
 static Voice g_voices[MAX_VOICES];
-static int16_t g_delayL[DELAY_SAMPLES];
-static int16_t g_delayR[DELAY_SAMPLES];
+static int16_t g_delayL[DELAY_SAMPLES] __attribute__((section(".ccmram")));
+static int16_t g_delayR[DELAY_SAMPLES] __attribute__((section(".ccmram")));
 static uint32_t g_delayIdx = 0;
 static int32_t g_lpL = 0;
 static int32_t g_lpR = 0;
@@ -188,6 +194,7 @@ static uint32_t g_step = 0;
 static uint32_t g_songStep = 0;
 static uint32_t g_samplesPerStep = 0;
 static uint32_t g_samplesToNextStep = 1;
+static volatile uint8_t g_demoSeqEnabled = 0;
 static uint16_t g_flangerPhase = 0;
 static uint8_t g_fxFlangerOn = 0;
 static uint8_t g_fxReverbBoost = 0;
@@ -206,31 +213,22 @@ typedef struct __attribute__((packed)) {
   uint16_t checksum;
 } SpiPacketHeader;
 
-static volatile uint8_t g_spiRxByte = 0;
-static volatile uint8_t g_spiTxByte = 0;
+/* ── SPI slave: buffers para dos transacciones CS separadas ── */
+#define SPI_RX_BUF_SIZE  536U   /* 8 header + 528 max payload */
+#define SPI_TX_BUF_SIZE  76U    /* 8 header + 68 max response */
 
-static volatile uint8_t g_spiHdrBuf[sizeof(SpiPacketHeader)];
-static volatile uint16_t g_spiHdrIdx = 0;
-static volatile uint8_t g_spiPayloadBuf[SPI_MAX_PAYLOAD];
-static volatile uint16_t g_spiPayloadIdx = 0;
-static volatile uint16_t g_spiPayloadLen = 0;
-static volatile uint8_t g_spiCmd = 0;
-static volatile uint16_t g_spiSeq = 0;
-static volatile uint16_t g_spiChk = 0;
-static volatile uint8_t g_spiState = 0;
+static uint8_t g_spiRxBuf[SPI_RX_BUF_SIZE];
+static uint8_t g_spiTxBuf[SPI_TX_BUF_SIZE];
+static volatile uint8_t g_spiWaitingPayload = 0;
 
 static volatile SpiTrigger g_spiTrigQ[SPI_TRIG_Q_LEN];
 static volatile uint8_t g_spiTrigHead = 0;
 static volatile uint8_t g_spiTrigTail = 0;
 
-static volatile uint8_t g_spiTxQ[SPI_TX_Q_LEN];
-static volatile uint16_t g_spiTxHead = 0;
-static volatile uint16_t g_spiTxTail = 0;
-
 static volatile uint8_t g_masterVolume = 100;
 static volatile uint8_t g_seqVolume = 100;
 static volatile uint8_t g_liveVolume = 100;
-static volatile uint8_t g_trackVolume[NUM_INSTRUMENTS] = {100,100,100,100,100};
+static volatile uint8_t g_trackVolume[NUM_INSTRUMENTS] = {[0 ... 15] = 100};
 static volatile uint8_t g_globalFilterType = 0;
 static volatile uint8_t g_globalFilterCutQ8 = 200;
 static volatile uint8_t g_globalFilterResQ8 = 32;
@@ -249,6 +247,8 @@ static volatile uint8_t g_delayFbQ8 = 96;
 static volatile uint8_t g_flangerEnabled = 1;
 static volatile uint8_t g_flangerDepth = 120;
 static volatile uint8_t g_flangerMixQ8 = 64;
+static volatile uint8_t g_flangerFeedbackQ8 = 64;
+static volatile uint8_t g_flangerRateStep = 3;
 static volatile uint8_t g_phaserEnabled = 0;
 static volatile uint8_t g_phaserDepthQ8 = 96;
 static volatile uint8_t g_phaserFeedbackQ8 = 48;
@@ -268,29 +268,31 @@ static volatile uint8_t g_cpuLoadPercent = 14;
 static volatile uint16_t g_masterPeakQ15 = 0;
 static volatile uint16_t g_trackPeakQ15[TRACK_PEAK_COUNT] = {0};
 static volatile uint16_t g_spiErrorCount = 0;
+static volatile uint32_t g_spiPacketCount = 0;
+static volatile uint16_t g_spiCrcErrorCount = 0;
 static volatile uint32_t g_samplesLoadedMask = 0;
 
-static volatile uint16_t g_instPitchQ12[NUM_INSTRUMENTS] = {4096,4096,4096,4096,4096};
+static volatile uint16_t g_instPitchQ12[NUM_INSTRUMENTS] = {[0 ... 15] = 4096};
 static volatile uint8_t g_padLoopEnabled[NUM_INSTRUMENTS] = {0};
 static volatile uint8_t g_padStutterEnabled[NUM_INSTRUMENTS] = {0};
-static volatile uint16_t g_padStutterInterval[NUM_INSTRUMENTS] = {220,220,220,220,220};
+static volatile uint16_t g_padStutterInterval[NUM_INSTRUMENTS] = {[0 ... 15] = 220};
 static volatile uint16_t g_padStutterCount[NUM_INSTRUMENTS] = {0};
 static volatile uint8_t g_trackFilterType[NUM_INSTRUMENTS] = {0};
-static volatile uint8_t g_trackFilterCutQ8[NUM_INSTRUMENTS] = {200,200,200,200,200};
-static volatile uint8_t g_trackFilterResQ8[NUM_INSTRUMENTS] = {32,32,32,32,32};
+static volatile uint8_t g_trackFilterCutQ8[NUM_INSTRUMENTS] = {[0 ... 15] = 200};
+static volatile uint8_t g_trackFilterResQ8[NUM_INSTRUMENTS] = {[0 ... 15] = 32};
 static int32_t g_trackFilterState[NUM_INSTRUMENTS] = {0};
 static volatile uint8_t g_padFilterType[NUM_INSTRUMENTS] = {0};
-static volatile uint8_t g_padFilterCutQ8[NUM_INSTRUMENTS] = {200,200,200,200,200};
-static volatile uint8_t g_padFilterResQ8[NUM_INSTRUMENTS] = {32,32,32,32,32};
+static volatile uint8_t g_padFilterCutQ8[NUM_INSTRUMENTS] = {[0 ... 15] = 200};
+static volatile uint8_t g_padFilterResQ8[NUM_INSTRUMENTS] = {[0 ... 15] = 32};
 static int32_t g_padFilterState[NUM_INSTRUMENTS] = {0};
 static volatile uint8_t g_trackDistQ8[NUM_INSTRUMENTS] = {0};
-static volatile uint8_t g_trackBitDepth[NUM_INSTRUMENTS] = {16,16,16,16,16};
+static volatile uint8_t g_trackBitDepth[NUM_INSTRUMENTS] = {[0 ... 15] = 16};
 static volatile uint8_t g_padDistQ8[NUM_INSTRUMENTS] = {0};
-static volatile uint8_t g_padBitDepth[NUM_INSTRUMENTS] = {16,16,16,16,16};
+static volatile uint8_t g_padBitDepth[NUM_INSTRUMENTS] = {[0 ... 15] = 16};
 static volatile uint8_t g_padScratchActive[NUM_INSTRUMENTS] = {0};
 static volatile uint16_t g_padScratchRateQ8[NUM_INSTRUMENTS] = {0};
 static volatile uint8_t g_padScratchDepthQ8[NUM_INSTRUMENTS] = {0};
-static volatile uint8_t g_padScratchCutQ8[NUM_INSTRUMENTS] = {128,128,128,128,128};
+static volatile uint8_t g_padScratchCutQ8[NUM_INSTRUMENTS] = {[0 ... 15] = 128};
 static volatile uint8_t g_padScratchCrackleQ8[NUM_INSTRUMENTS] = {0};
 static uint16_t g_padScratchPhase[NUM_INSTRUMENTS] = {0};
 static int32_t g_padScratchState[NUM_INSTRUMENTS] = {0};
@@ -298,8 +300,8 @@ static int32_t g_padScratchState[NUM_INSTRUMENTS] = {0};
 static volatile uint8_t g_padTurnActive[NUM_INSTRUMENTS] = {0};
 static volatile uint8_t g_padTurnAuto[NUM_INSTRUMENTS] = {0};
 static volatile int8_t g_padTurnMode[NUM_INSTRUMENTS] = {0};
-static volatile uint16_t g_padTurnBrakeMs[NUM_INSTRUMENTS] = {150,150,150,150,150};
-static volatile uint16_t g_padTurnBackspinMs[NUM_INSTRUMENTS] = {120,120,120,120,120};
+static volatile uint16_t g_padTurnBrakeMs[NUM_INSTRUMENTS] = {[0 ... 15] = 150};
+static volatile uint16_t g_padTurnBackspinMs[NUM_INSTRUMENTS] = {[0 ... 15] = 120};
 static volatile uint16_t g_padTurnRateQ8[NUM_INSTRUMENTS] = {0};
 static volatile uint8_t g_padTurnNoiseQ8[NUM_INSTRUMENTS] = {0};
 static uint16_t g_padTurnPhase[NUM_INSTRUMENTS] = {0};
@@ -332,6 +334,7 @@ typedef struct {
   uint8_t depthQ8;
   uint8_t feedbackQ8;
   uint8_t mixQ8;
+  uint8_t rateStep;
   uint16_t writePos;
   uint16_t phase;
 } TrackFlangerState;
@@ -357,8 +360,8 @@ static TrackEchoState g_trackEcho[NUM_INSTRUMENTS];
 static TrackFlangerState g_trackFlanger[NUM_INSTRUMENTS];
 static TrackCompState g_trackComp[NUM_INSTRUMENTS];
 static SidechainState g_sidechain = {0};
-static int16_t g_trackEchoBuf[NUM_INSTRUMENTS][TRACK_FX_BUF_SAMPLES];
-static int16_t g_trackFlangerBuf[NUM_INSTRUMENTS][TRACK_FX_BUF_SAMPLES];
+static int16_t g_trackEchoBuf[NUM_INSTRUMENTS][TRACK_FX_BUF_SAMPLES] __attribute__((section(".ccmram")));
+static int16_t g_trackFlangerBuf[NUM_INSTRUMENTS][TRACK_FX_BUF_SAMPLES] __attribute__((section(".ccmram")));
 
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
@@ -376,6 +379,8 @@ static uint32_t FAT32_ClusterToLba(const Fat32Info *fs, uint32_t cluster);
 static int FAT32_NextCluster(const Fat32Info *fs, uint32_t cluster, uint32_t *next_cluster);
 static int FAT32_FindRootDirCluster(const Fat32Info *fs, const char *dirName, uint32_t *cluster_out);
 static int FAT32_OpenWavInDirByIndex(const Fat32Info *fs, uint32_t dir_cluster, uint32_t wav_index, FileCtx *file);
+static int FAT32_OpenWavByName(const Fat32Info *fs, uint32_t dir_cluster, const char *target, FileCtx *file);
+static int LoadInstrumentFromFile(const char *dirName, const char *fileName, InstrumentSample *out);
 
 static int File_Read(FileCtx *file, uint8_t *dst, uint32_t bytes, uint32_t *read_bytes);
 static int File_Skip(FileCtx *file, uint32_t bytes);
@@ -386,12 +391,10 @@ static int16_t ClipS16(int32_t x);
 static void TriggerVoice(uint8_t inst, int16_t gain_q15, int8_t pan);
 static void ProcessSpiTriggers(void);
 static uint16_t SpiCrc16(const uint8_t *data, uint16_t len);
-static void SpiTxEnqueue(const uint8_t *data, uint16_t len);
-static uint8_t SpiTxPopByte(void);
-static void SpiEnqueueResponse(uint8_t cmd, uint16_t sequence, const uint8_t *payload, uint16_t len);
 static void SpiQueueTrigger(uint8_t pad, uint8_t vel);
+static void SpiEnqueueResponse(uint8_t cmd, uint16_t sequence, const uint8_t *payload, uint16_t len);
 static void SpiHandleCommand(uint8_t cmd, const uint8_t *payload, uint16_t len, uint16_t seq);
-static void SpiParseIncomingByte(uint8_t byte_in);
+static void SpiRearmReceive(void);
 static void ProcessSequencerStep(void);
 static void RenderDemoBuffer(uint16_t *dst, uint32_t words);
 
@@ -794,6 +797,155 @@ static int16_t ClipS16(int32_t x)
   return (int16_t)x;
 }
 
+/* Extrae el byte ASCII de la posición i (0-12) de una entrada LFN FAT32 */
+static char LFN_GetChar(const uint8_t *entry, int i)
+{
+  static const uint8_t off[13] = {1,3,5,7,9,14,16,18,20,22,24,28,30};
+  return (char)entry[off[i]];
+}
+
+/* Abre un WAV en dir_cluster por su nombre LFN (comparación case-insensitive) */
+static int FAT32_OpenWavByName(const Fat32Info *fs, uint32_t dir_cluster,
+                               const char *target, FileCtx *file)
+{
+  uint8_t sec[512];
+  char lfn[256];
+  int lfn_len = 0;
+  uint32_t cluster = dir_cluster;
+
+  while (cluster >= 2U && cluster < 0x0FFFFFF8U)
+  {
+    for (uint32_t s = 0; s < fs->sectors_per_cluster; s++)
+    {
+      uint32_t lba = FAT32_ClusterToLba(fs, cluster) + s;
+      if (SD_ReadSectors(lba, sec, 1) != 0) return -1;
+
+      for (int off = 0; off < 512; off += 32)
+      {
+        uint8_t *e = &sec[off];
+        if (e[0] == 0x00) return -2; /* fin de directorio */
+        if (e[0] == 0xE5) { lfn_len = 0; continue; /* borrado */ }
+
+        if (e[11] == 0x0F) /* entrada LFN */
+        {
+          uint8_t seq = e[0] & 0x1FU;
+          int base = (int)(seq - 1U) * 13;
+          for (int i = 0; i < 13; i++)
+          {
+            char c = LFN_GetChar(e, i);
+            if ((base + i) < 255) lfn[base + i] = c;
+          }
+          if (e[0] & 0x40U) /* último fragmento LFN: calc longitud */
+          {
+            int n = 0;
+            for (int i = 0; i < 13; i++) {
+              char c = LFN_GetChar(e, i);
+              if (c == '\0' || (uint8_t)c == 0xFFU) break;
+              n++;
+            }
+            lfn_len = base + n;
+            if (lfn_len < 255) lfn[lfn_len] = '\0';
+          }
+          continue;
+        }
+
+        /* Entrada normal */
+        uint8_t attr = e[11];
+        if (attr & 0x08U) { lfn_len = 0; continue; }
+        if (attr & 0x10U) { lfn_len = 0; continue; }
+        if (!IsWavEntry(e)) { lfn_len = 0; continue; }
+
+        /* Comparar nombre LFN (case-insensitive) */
+        int match = 0;
+        if (lfn_len > 0)
+        {
+          int tlen = 0;
+          while (target[tlen]) tlen++;
+          if (tlen == lfn_len)
+          {
+            match = 1;
+            for (int i = 0; i < tlen; i++) {
+              char a = lfn[i], b = target[i];
+              if (a >= 'a' && a <= 'z') a = (char)(a - 32);
+              if (b >= 'a' && b <= 'z') b = (char)(b - 32);
+              if (a != b) { match = 0; break; }
+            }
+          }
+        }
+        lfn_len = 0;
+
+        if (match)
+        {
+          memset(file, 0, sizeof(*file));
+          file->fs = *fs;
+          file->first_cluster = EntryCluster(e);
+          file->current_cluster = file->first_cluster;
+          file->file_size = le32(&e[28]);
+          return 0;
+        }
+      }
+    }
+    uint32_t next;
+    if (FAT32_NextCluster(fs, cluster, &next) != 0) return -3;
+    cluster = next;
+  }
+  return -4;
+}
+
+/* Carga un WAV por nombre de fichero LFN desde una carpeta en raíz */
+static int LoadInstrumentFromFile(const char *dirName, const char *fileName,
+                                  InstrumentSample *out)
+{
+  Fat32Info fs;
+  if (FAT32_Init(&fs) != 0) return -1;
+
+  uint32_t dir_cluster = 0;
+  if (FAT32_FindRootDirCluster(&fs, dirName, &dir_cluster) != 0) return -2;
+
+  FileCtx file;
+  if (FAT32_OpenWavByName(&fs, dir_cluster, fileName, &file) != 0) return -3;
+
+  WavInfo wav;
+  if (WAV_ReadHeader(&file, &wav) != 0) return -4;
+
+  uint32_t frames = 0;
+  while (frames < MAX_SAMPLE_FRAMES)
+  {
+    uint32_t remain = MAX_SAMPLE_FRAMES - frames;
+    uint32_t want = (wav.channels == 2U) ? (remain * 4U) : (remain * 2U);
+    if (want > SD_READ_BYTES) want = SD_READ_BYTES;
+    uint32_t got = 0;
+    if (File_Read(&file, sdReadBuf, want, &got) != 0 || got == 0) break;
+    if (wav.channels == 2U)
+    {
+      uint32_t sframes = got / 4U;
+      int16_t *src = (int16_t*)sdReadBuf;
+      for (uint32_t i = 0; i < sframes && frames < MAX_SAMPLE_FRAMES; i++)
+      {
+        int32_t m = ((int32_t)src[i*2] + (int32_t)src[i*2+1]) / 2;
+        out->data[frames++] = ClipS16(m);
+      }
+    }
+    else
+    {
+      uint32_t mframes = got / 2U;
+      int16_t *src = (int16_t*)sdReadBuf;
+      for (uint32_t i = 0; i < mframes && frames < MAX_SAMPLE_FRAMES; i++)
+        out->data[frames++] = src[i];
+    }
+  }
+  out->length = frames;
+  out->loaded = (frames > 0U) ? 1U : 0U;
+  if (out->loaded)
+  {
+    for (uint32_t i = 0; i < NUM_INSTRUMENTS; i++)
+    {
+      if (out == &g_samples[i]) { g_samplesLoadedMask |= (1U << i); break; }
+    }
+  }
+  return out->loaded ? 0 : -5;
+}
+
 static int LoadInstrumentFromFolder(const char *folderName, InstrumentSample *out)
 {
   Fat32Info fs;
@@ -853,6 +1005,61 @@ static int LoadInstrumentFromFolder(const char *folderName, InstrumentSample *ou
   return out->loaded ? 0 : -5;
 }
 
+static void GenerateFallbackSample(uint8_t inst, InstrumentSample *out)
+{
+  uint32_t n = 1200U;
+  if (n > MAX_SAMPLE_FRAMES) n = MAX_SAMPLE_FRAMES;
+  out->length = n;
+  out->loaded = 1U;
+
+  for (uint32_t i = 0; i < n; i++)
+  {
+    int32_t env = (int32_t)((n - i) * 32767U / n);
+    int32_t s = 0;
+    switch (inst)
+    {
+      case 0: // kick
+      {
+        uint32_t period = 18U + ((i * 80U) / n);
+        uint32_t ph = i % period;
+        s = (ph < (period / 2U)) ? 22000 : -22000;
+        break;
+      }
+      case 1: // snare
+      {
+        int32_t rnd = (int32_t)((FastRandU32() >> 16) & 0x7FFF) - 16384;
+        s = rnd * 2;
+        break;
+      }
+      case 2: // closed hat
+      {
+        int32_t rnd = (int32_t)((FastRandU32() >> 16) & 0x7FFF) - 16384;
+        s = rnd * 3;
+        env = (int32_t)((n - i) * 32767U / (n / 2U));
+        if (env < 0) env = 0;
+        break;
+      }
+      case 3: // open hat
+      {
+        int32_t rnd = (int32_t)((FastRandU32() >> 16) & 0x7FFF) - 16384;
+        s = rnd * 2;
+        break;
+      }
+      default: // clap
+      {
+        int32_t pulse = ((i % 120U) < 25U || (i > 200U && (i % 140U) < 30U)) ? 18000 : 0;
+        int32_t rnd = (int32_t)((FastRandU32() >> 16) & 0x7FFF) - 16384;
+        s = pulse + rnd;
+        break;
+      }
+    }
+    s = (s * env) >> 15;
+    out->data[i] = ClipS16(s);
+  }
+
+  if (inst < NUM_INSTRUMENTS) g_samplesLoadedMask |= (1U << inst);
+}
+
 static void TriggerVoice(uint8_t inst, int16_t gain_q15, int8_t pan)
 {
   if (inst >= NUM_INSTRUMENTS || !g_samples[inst].loaded) return;
@@ -896,6 +1103,7 @@ static void ProcessSpiTriggers(void)
     uint8_t inst = (uint8_t)(pad % NUM_INSTRUMENTS);
     int32_t gain = 12000 + ((int32_t)vel * 140);
     gain = (gain * g_liveVolume) / 100;
+    gain = (gain * g_trackVolume[inst]) / 100;
     gain = (gain * g_abLiveTrimQ8) >> 8;
     if (gain > 32000) gain = 32000;
     int8_t pan = 0;
@@ -922,30 +1130,6 @@ static uint16_t SpiCrc16(const uint8_t *data, uint16_t len)
   return crc;
 }
 
-static void SpiTxEnqueue(const uint8_t *data, uint16_t len)
-{
-  __disable_irq();
-  for (uint16_t i = 0; i < len; i++)
-  {
-    uint16_t next = (uint16_t)((g_spiTxHead + 1U) % SPI_TX_Q_LEN);
-    if (next == g_spiTxTail) break;
-    g_spiTxQ[g_spiTxHead] = data[i];
-    g_spiTxHead = next;
-  }
-  __enable_irq();
-}
-
-static uint8_t SpiTxPopByte(void)
-{
-  uint8_t out = 0;
-  if (g_spiTxTail != g_spiTxHead)
-  {
-    out = g_spiTxQ[g_spiTxTail];
-    g_spiTxTail = (uint16_t)((g_spiTxTail + 1U) % SPI_TX_Q_LEN);
-  }
-  return out;
-}
-
 static void SpiQueueTrigger(uint8_t pad, uint8_t vel)
 {
   uint8_t next = (uint8_t)((g_spiTrigHead + 1U) % SPI_TRIG_Q_LEN);
@@ -955,22 +1139,38 @@ static void SpiQueueTrigger(uint8_t pad, uint8_t vel)
   g_spiTrigHead = next;
 }
 
+/* Re-arm SPI slave para recibir el siguiente header de 8 bytes (Txn 1) */
+static void SpiRearmReceive(void)
+{
+  g_spiWaitingPayload = 0;
+  HAL_SPI_Receive_DMA(&hspi1, g_spiRxBuf, 8);
+}
+
 static void SpiEnqueueResponse(uint8_t cmd, uint16_t sequence, const uint8_t *payload, uint16_t len)
 {
-  uint8_t hdr[8];
+  /* Comandos sin respuesta (TRIG_LIVE, SMPL_*, volumen, etc.): solo Txn 1.
+   * El ESP32 NO espera Txn 2 → rearmar RX directamente. */
+  if (len == 0U && payload == NULL)
+  {
+    SpiRearmReceive();
+    return;
+  }
+
+  /* Comandos con respuesta (PING, GET_PEAKS, etc.): construir Txn 2 */
   uint16_t crc = SpiCrc16(payload, len);
+  g_spiTxBuf[0] = SPI_MAGIC_RESP;
+  g_spiTxBuf[1] = cmd;
+  g_spiTxBuf[2] = (uint8_t)(len & 0xFFU);
+  g_spiTxBuf[3] = (uint8_t)((len >> 8) & 0xFFU);
+  g_spiTxBuf[4] = (uint8_t)(sequence & 0xFFU);
+  g_spiTxBuf[5] = (uint8_t)((sequence >> 8) & 0xFFU);
+  g_spiTxBuf[6] = (uint8_t)(crc & 0xFFU);
+  g_spiTxBuf[7] = (uint8_t)((crc >> 8) & 0xFFU);
+  if (len > 0U && payload != NULL)
+    memcpy(g_spiTxBuf + 8U, payload, len);
 
-  hdr[0] = SPI_MAGIC_RESP;
-  hdr[1] = cmd;
-  hdr[2] = (uint8_t)(len & 0xFFU);
-  hdr[3] = (uint8_t)((len >> 8) & 0xFFU);
-  hdr[4] = (uint8_t)(sequence & 0xFFU);
-  hdr[5] = (uint8_t)((sequence >> 8) & 0xFFU);
-  hdr[6] = (uint8_t)(crc & 0xFFU);
-  hdr[7] = (uint8_t)((crc >> 8) & 0xFFU);
-
-  SpiTxEnqueue(hdr, sizeof(hdr));
-  if (len > 0U) SpiTxEnqueue(payload, len);
+  /* Txn 2: master clokea N bytes y STM32 transmite la respuesta */
+  HAL_SPI_Transmit_IT(&hspi1, g_spiTxBuf, (uint16_t)(8U + len));
 }
 
 static uint8_t ActiveVoicesCount(void)
@@ -979,6 +1179,7 @@ static uint8_t ActiveVoicesCount(void)
   for (uint32_t i = 0; i < MAX_VOICES; i++) if (g_voices[i].active) cnt++;
   return cnt;
 }
+
 
 static void StopInstrumentVoices(uint8_t inst)
 {
@@ -993,8 +1194,74 @@ static void StopAllVoices(void)
   for (uint32_t i = 0; i < MAX_VOICES; i++) g_voices[i].active = 0;
 }
 
+static void ClearTrackLiveFx(uint8_t track)
+{
+  g_trackEcho[track].active = 0U;
+  g_trackEcho[track].delaySamples = 0U;
+  g_trackEcho[track].feedbackQ8 = 0U;
+  g_trackEcho[track].mixQ8 = 0U;
+  g_trackEcho[track].writePos = 0U;
+
+  g_trackFlanger[track].active = 0U;
+  g_trackFlanger[track].depthQ8 = 0U;
+  g_trackFlanger[track].feedbackQ8 = 0U;
+  g_trackFlanger[track].mixQ8 = 0U;
+  g_trackFlanger[track].rateStep = 0U;
+  g_trackFlanger[track].writePos = 0U;
+  g_trackFlanger[track].phase = 0U;
+
+  g_trackComp[track].active = 0U;
+  g_trackComp[track].envQ15 = 0U;
+
+  memset(g_trackEchoBuf[track], 0, sizeof(g_trackEchoBuf[track]));
+  memset(g_trackFlangerBuf[track], 0, sizeof(g_trackFlangerBuf[track]));
+}
+
+static void ClearTrackAllFx(uint8_t track)
+{
+  g_trackFilterType[track] = 0U;
+  g_trackFilterCutQ8[track] = 200U;
+  g_trackFilterResQ8[track] = 32U;
+  g_trackFilterState[track] = 0;
+  g_trackDistQ8[track] = 0U;
+  g_trackBitDepth[track] = 16U;
+  ClearTrackLiveFx(track);
+}
+
+static void ClearPadAllFx(uint8_t pad)
+{
+  g_padFilterType[pad] = 0U;
+  g_padFilterCutQ8[pad] = 200U;
+  g_padFilterResQ8[pad] = 32U;
+  g_padFilterState[pad] = 0;
+  g_padDistQ8[pad] = 0U;
+  g_padBitDepth[pad] = 16U;
+  g_padStutterEnabled[pad] = 0U;
+  g_padStutterCount[pad] = 0U;
+
+  g_padScratchActive[pad] = 0U;
+  g_padScratchRateQ8[pad] = 0U;
+  g_padScratchDepthQ8[pad] = 0U;
+  g_padScratchCutQ8[pad] = 128U;
+  g_padScratchCrackleQ8[pad] = 0U;
+  g_padScratchPhase[pad] = 0U;
+  g_padScratchState[pad] = 0;
+
+  g_padTurnActive[pad] = 0U;
+  g_padTurnAuto[pad] = 0U;
+  g_padTurnMode[pad] = 0;
+  g_padTurnBrakeMs[pad] = 150U;
+  g_padTurnBackspinMs[pad] = 120U;
+  g_padTurnRateQ8[pad] = 0U;
+  g_padTurnNoiseQ8[pad] = 0U;
+  g_padTurnPhase[pad] = 0U;
+  g_padTurnCounter[pad] = 0U;
+}
+
 static void SpiHandleCommand(uint8_t cmd, const uint8_t *payload, uint16_t len, uint16_t seq)
 {
+  uint8_t sendGenericAck = 1U;
+
   switch (cmd)
   {
     case CMD_TRIGGER_SEQ:
@@ -1024,22 +1291,53 @@ static void SpiHandleCommand(uint8_t cmd, const uint8_t *payload, uint16_t len, 
       break;
 
     case CMD_MASTER_VOLUME:
-      if (len >= 1U) g_masterVolume = payload[0];
+      if (len >= 1U)
+      {
+        uint8_t v = payload[0];
+        if (v > 180U) v = 180U;
+        g_masterVolume = v;
+      }
       break;
 
     case CMD_SEQ_VOLUME:
-      if (len >= 1U) g_seqVolume = payload[0];
+      if (len >= 1U)
+      {
+        uint8_t v = payload[0];
+        if (v > 200U) v = 200U;
+        g_seqVolume = v;
+      }
       break;
 
     case CMD_LIVE_VOLUME:
-      if (len >= 1U) g_liveVolume = payload[0];
+      if (len >= 1U)
+      {
+        uint8_t v = payload[0];
+        if (v > 200U) v = 200U;
+        g_liveVolume = v;
+      }
       break;
 
     case CMD_TRACK_VOLUME:
       if (len >= 2U)
       {
         uint8_t tr = payload[0] % NUM_INSTRUMENTS;
-        g_trackVolume[tr] = payload[1];
+        uint8_t v = payload[1];
+        if (v > 200U) v = 200U;
+        g_trackVolume[tr] = v;
+      }
+      break;
+
+    case CMD_LIVE_PITCH:
+      if (len >= 4U)
+      {
+        float pitch;
+        memcpy(&pitch, payload, sizeof(float));
+        if (pitch < 0.25f) pitch = 0.25f;
+        if (pitch > 4.0f) pitch = 4.0f;
+        uint32_t q12 = (uint32_t)(pitch * 4096.0f);
+        if (q12 < 512U) q12 = 512U;
+        if (q12 > 16384U) q12 = 16384U;
+        for (uint32_t i = 0; i < NUM_INSTRUMENTS; i++) g_instPitchQ12[i] = (uint16_t)q12;
       }
       break;
 
@@ -1145,16 +1443,21 @@ static void SpiHandleCommand(uint8_t cmd, const uint8_t *payload, uint16_t len, 
       }
       break;
 
-    case CMD_TRACK_CLEAR_FX:
+    case CMD_TRACK_CLEAR_FILTER:
       if (len >= 1U)
       {
         uint8_t track = payload[0] % NUM_INSTRUMENTS;
         g_trackFilterType[track] = 0U;
-        g_trackDistQ8[track] = 0U;
-        g_trackBitDepth[track] = 16U;
-        g_trackEcho[track].active = 0U;
-        g_trackFlanger[track].active = 0U;
-        g_trackComp[track].active = 0U;
+        g_trackFilterCutQ8[track] = 0U;
+        g_trackFilterResQ8[track] = 0U;
+      }
+      break;
+
+    case CMD_TRACK_CLEAR_FX:
+      if (len >= 1U)
+      {
+        uint8_t track = payload[0] % NUM_INSTRUMENTS;
+        ClearTrackAllFx(track);
       }
       break;
 
@@ -1216,6 +1519,10 @@ static void SpiHandleCommand(uint8_t cmd, const uint8_t *payload, uint16_t len, 
         memcpy(&rt, payload, sizeof(float));
         if (rt < 0.05f) rt = 0.05f;
         if (rt > 6.0f) rt = 6.0f;
+        uint32_t st = (uint32_t)(rt * 1.4f);
+        if (st < 1U) st = 1U;
+        if (st > 12U) st = 12U;
+        g_flangerRateStep = (uint8_t)st;
       }
       break;
 
@@ -1226,6 +1533,7 @@ static void SpiHandleCommand(uint8_t cmd, const uint8_t *payload, uint16_t len, 
         memcpy(&fb, payload, sizeof(float));
         if (fb < 0.0f) fb = 0.0f;
         if (fb > 0.95f) fb = 0.95f;
+        g_flangerFeedbackQ8 = (uint8_t)(fb * 255.0f);
       }
       break;
 
@@ -1396,6 +1704,8 @@ static void SpiHandleCommand(uint8_t cmd, const uint8_t *payload, uint16_t len, 
         g_trackFlanger[track].active = active;
         g_trackFlanger[track].depthQ8 = (uint8_t)((depth * 255.0f) / 100.0f);
         g_trackFlanger[track].feedbackQ8 = (uint8_t)((feedback * 255.0f) / 100.0f);
+        g_trackFlanger[track].rateStep = (uint8_t)(1U + (uint32_t)(rate * 1.2f));
+        if (g_trackFlanger[track].rateStep > 14U) g_trackFlanger[track].rateStep = 14U;
         g_trackFlanger[track].mixQ8 = (uint8_t)(96U + (g_trackFlanger[track].depthQ8 / 2U));
         if (g_trackFlanger[track].mixQ8 > 220U) g_trackFlanger[track].mixQ8 = 220U;
       }
@@ -1430,9 +1740,7 @@ static void SpiHandleCommand(uint8_t cmd, const uint8_t *payload, uint16_t len, 
       if (len >= 1U)
       {
         uint8_t track = payload[0] % NUM_INSTRUMENTS;
-        g_trackEcho[track].active = 0U;
-        g_trackFlanger[track].active = 0U;
-        g_trackComp[track].active = 0U;
+        ClearTrackLiveFx(track);
       }
       break;
 
@@ -1543,6 +1851,8 @@ static void SpiHandleCommand(uint8_t cmd, const uint8_t *payload, uint16_t len, 
       if (len >= 1U)
       {
         uint8_t pad = payload[0] % NUM_INSTRUMENTS;
+        StopInstrumentVoices(pad);
+        ClearPadAllFx(pad);
         g_samples[pad].length = 0U;
         g_samples[pad].loaded = 0U;
         g_samplesLoadedMask &= ~(1U << pad);
@@ -1550,8 +1860,10 @@ static void SpiHandleCommand(uint8_t cmd, const uint8_t *payload, uint16_t len, 
       break;
 
     case CMD_SAMPLE_UNLOAD_ALL:
+      StopAllVoices();
       for (uint32_t k = 0; k < NUM_INSTRUMENTS; k++)
       {
+        ClearPadAllFx((uint8_t)k);
         g_samples[k].length = 0U;
         g_samples[k].loaded = 0U;
       }
@@ -1619,14 +1931,21 @@ static void SpiHandleCommand(uint8_t cmd, const uint8_t *payload, uint16_t len, 
       }
       break;
 
-    case CMD_PAD_CLEAR_FX:
+    case CMD_PAD_CLEAR_FILTER:
       if (len >= 1U)
       {
         uint8_t pad = payload[0] % NUM_INSTRUMENTS;
         g_padFilterType[pad] = 0U;
-        g_padDistQ8[pad] = 0U;
-        g_padBitDepth[pad] = 16U;
-        g_padStutterEnabled[pad] = 0U;
+        g_padFilterCutQ8[pad] = 0U;
+        g_padFilterResQ8[pad] = 0U;
+      }
+      break;
+
+    case CMD_PAD_CLEAR_FX:
+      if (len >= 1U)
+      {
+        uint8_t pad = payload[0] % NUM_INSTRUMENTS;
+        ClearPadAllFx(pad);
       }
       break;
 
@@ -1739,6 +2058,7 @@ static void SpiHandleCommand(uint8_t cmd, const uint8_t *payload, uint16_t len, 
 
     case CMD_GET_STATUS:
     {
+      sendGenericAck = 0U;
       uint8_t resp[16] = {0};
       uint16_t freeKb = 0;
       uint32_t uptime = HAL_GetTick() / 1000U;
@@ -1758,12 +2078,15 @@ static void SpiHandleCommand(uint8_t cmd, const uint8_t *payload, uint16_t len, 
       resp[11] = (uint8_t)((uptime >> 24) & 0xFFU);
       resp[12] = (uint8_t)(spiErr & 0xFFU);
       resp[13] = (uint8_t)((spiErr >> 8) & 0xFFU);
+      resp[14] = (uint8_t)(g_spiPacketCount & 0xFFU);
+      resp[15] = (uint8_t)(g_spiCrcErrorCount & 0xFFU);
       SpiEnqueueResponse(cmd, seq, resp, sizeof(resp));
       break;
     }
 
     case CMD_GET_PEAKS:
     {
+      sendGenericAck = 0U;
       float peaks[17];
       for (int i = 0; i < 16; i++) peaks[i] = ((float)g_trackPeakQ15[i]) / 32767.0f;
       peaks[16] = ((float)g_masterPeakQ15) / 32767.0f;
@@ -1772,29 +2095,31 @@ static void SpiHandleCommand(uint8_t cmd, const uint8_t *payload, uint16_t len, 
     }
 
     case CMD_GET_CPU_LOAD:
+      sendGenericAck = 0U;
       SpiEnqueueResponse(cmd, seq, (uint8_t*)&g_cpuLoadPercent, 1U);
       break;
 
     case CMD_GET_VOICES:
     {
+      sendGenericAck = 0U;
       uint8_t v = ActiveVoicesCount();
       SpiEnqueueResponse(cmd, seq, &v, 1U);
       break;
     }
 
     case CMD_PING:
-      if (len >= 4U)
-      {
-        uint8_t pong[8];
-        memcpy(pong, payload, 4);
-        uint32_t up = HAL_GetTick();
-        pong[4] = (uint8_t)(up & 0xFFU);
-        pong[5] = (uint8_t)((up >> 8) & 0xFFU);
-        pong[6] = (uint8_t)((up >> 16) & 0xFFU);
-        pong[7] = (uint8_t)((up >> 24) & 0xFFU);
-        SpiEnqueueResponse(cmd, seq, pong, sizeof(pong));
-      }
+    {
+      sendGenericAck = 0U;
+      uint8_t pong[8] = {0};
+      if (len >= 4U) memcpy(pong, payload, 4U);
+      uint32_t up = HAL_GetTick();
+      pong[4] = (uint8_t)(up & 0xFFU);
+      pong[5] = (uint8_t)((up >> 8) & 0xFFU);
+      pong[6] = (uint8_t)((up >> 16) & 0xFFU);
+      pong[7] = (uint8_t)((up >> 24) & 0xFFU);
+      SpiEnqueueResponse(cmd, seq, pong, sizeof(pong));
       break;
+    }
 
     case CMD_RESET:
       StopAllVoices();
@@ -1808,12 +2133,23 @@ static void SpiHandleCommand(uint8_t cmd, const uint8_t *payload, uint16_t len, 
       g_globalSrPhase = 0U;
       g_globalSrHoldL = 0;
       g_globalSrHoldR = 0;
+      g_flangerFeedbackQ8 = 64U;
+      g_flangerRateStep = 3U;
       g_phaserFeedbackQ8 = 48U;
       g_phaserRateStep = 2U;
       g_phaserLast = 0;
       g_phaserPhase = 0;
       g_masterCompAttackK = 64U;
       g_masterCompReleaseK = 8U;
+      g_sidechain.active = 0U;
+      g_sidechain.envQ15 = 0U;
+      for (uint32_t k = 0; k < NUM_INSTRUMENTS; k++)
+      {
+        ClearTrackAllFx((uint8_t)k);
+        ClearPadAllFx((uint8_t)k);
+      }
+      g_spiPacketCount = 0U;
+      g_spiCrcErrorCount = 0U;
       for (uint32_t t = 0; t < TRACK_PEAK_COUNT; t++) g_trackPeakQ15[t] = 0U;
       g_masterPeakQ15 = 0U;
       break;
@@ -1855,82 +2191,109 @@ static void SpiHandleCommand(uint8_t cmd, const uint8_t *payload, uint16_t len, 
       break;
 
     default:
+      /* Comando desconocido: enviar ACK genérico para no dejar SPI colgado */
       break;
   }
-}
 
-static void SpiParseIncomingByte(uint8_t byte_in)
-{
-  if (g_spiState == 0U)
+  if (sendGenericAck)
   {
-    if (byte_in == SPI_MAGIC_CMD || byte_in == SPI_MAGIC_SAMPLE || byte_in == SPI_MAGIC_BULK)
-    {
-      g_spiHdrIdx = 0;
-      g_spiHdrBuf[g_spiHdrIdx++] = byte_in;
-      g_spiState = 1U;
-    }
-    return;
-  }
-
-  if (g_spiState == 1U)
-  {
-    g_spiHdrBuf[g_spiHdrIdx++] = byte_in;
-    if (g_spiHdrIdx >= sizeof(SpiPacketHeader))
-    {
-      g_spiCmd = g_spiHdrBuf[1];
-      g_spiPayloadLen = (uint16_t)(g_spiHdrBuf[2] | (g_spiHdrBuf[3] << 8));
-      g_spiSeq = (uint16_t)(g_spiHdrBuf[4] | (g_spiHdrBuf[5] << 8));
-      g_spiChk = (uint16_t)(g_spiHdrBuf[6] | (g_spiHdrBuf[7] << 8));
-
-      if (g_spiPayloadLen > SPI_MAX_PAYLOAD)
-      {
-        g_spiErrorCount++;
-        g_spiState = 0U;
-        return;
-      }
-
-      g_spiPayloadIdx = 0;
-      g_spiState = (g_spiPayloadLen == 0U) ? 3U : 2U;
-    }
-    return;
-  }
-
-  if (g_spiState == 2U)
-  {
-    g_spiPayloadBuf[g_spiPayloadIdx++] = byte_in;
-    if (g_spiPayloadIdx >= g_spiPayloadLen) g_spiState = 3U;
-    return;
-  }
-
-  if (g_spiState == 3U)
-  {
-    uint16_t crc = SpiCrc16((const uint8_t*)g_spiPayloadBuf, g_spiPayloadLen);
-    if (crc == g_spiChk)
-      SpiHandleCommand(g_spiCmd, (const uint8_t*)g_spiPayloadBuf, g_spiPayloadLen, g_spiSeq);
-    else
-      g_spiErrorCount++;
-    g_spiState = 0U;
+    SpiEnqueueResponse(cmd, seq, NULL, 0U);
   }
 }
 
-void HAL_SPI_TxRxCpltCallback(SPI_HandleTypeDef *hspi)
+/* ══ SPI SLAVE: CALLBACKS MODELO DOS-CS ══
+ *
+ * Txn 1: master baja CS, envía header(8) + payload(N) bytes, sube CS
+ *        → STM32 recibe en g_spiRxBuf via HAL_SPI_Receive_IT
+ *        → al completar, procesa comando y arma g_spiTxBuf para Txn 2
+ *
+ * Txn 2: master baja CS 500µs después, clokea N bytes
+ *        → STM32 transmite g_spiTxBuf via HAL_SPI_Transmit_IT
+ *        → al completar, rearma recepción para siguiente Txn 1
+ */
+
+void HAL_SPI_ErrorCallback(SPI_HandleTypeDef *hspi)
 {
   if (hspi->Instance == SPI1)
   {
-    SpiParseIncomingByte(g_spiRxByte);
-    g_spiTxByte = SpiTxPopByte();
-    (void)HAL_SPI_TransmitReceive_IT(&hspi1, (uint8_t*)&g_spiTxByte, (uint8_t*)&g_spiRxByte, 1);
+    g_spiErrorCount++;
+    g_spiWaitingPayload = 0;
+    HAL_SPI_Abort(&hspi1);
+    SpiRearmReceive();
   }
 }
 
 void HAL_SPI_RxCpltCallback(SPI_HandleTypeDef *hspi)
 {
-  if (hspi->Instance == SPI1)
+  if (hspi->Instance != SPI1) return;
+
+  SpiPacketHeader *hdr = (SpiPacketHeader*)g_spiRxBuf;
+
+  /* ── Paso 1: acaba de llegar el header (8 bytes) ── */
+  if (!g_spiWaitingPayload)
   {
-    SpiParseIncomingByte(g_spiRxByte);
-    g_spiTxByte = SpiTxPopByte();
-    (void)HAL_SPI_TransmitReceive_IT(&hspi1, (uint8_t*)&g_spiTxByte, (uint8_t*)&g_spiRxByte, 1);
+    if (hdr->magic != SPI_MAGIC_CMD)
+    {
+      /* Header inválido, rearmar */
+      g_spiErrorCount++;
+      SpiRearmReceive();
+      return;
+    }
+    if (hdr->length > 0U && hdr->length <= (SPI_RX_BUF_SIZE - 8U))
+    {
+      /* Hay payload: leerlo en la misma Txn 1 (NSS sigue LOW) */
+      g_spiWaitingPayload = 1;
+      HAL_SPI_Receive_DMA(&hspi1, g_spiRxBuf + 8U, hdr->length);
+      return;
+    }
+    /* length==0: ya tenemos el paquete completo, caer al Paso 2 */
   }
+
+  /* ── Paso 2: paquete completo (header + payload) ── */
+  g_spiWaitingPayload = 0;
+  uint16_t payloadLen = hdr->length;
+  uint8_t *payload    = g_spiRxBuf + sizeof(SpiPacketHeader);
+  uint16_t seq        = (uint16_t)(g_spiRxBuf[4] | ((uint16_t)g_spiRxBuf[5] << 8));
+  uint16_t rxCrc      = (uint16_t)(g_spiRxBuf[6] | ((uint16_t)g_spiRxBuf[7] << 8));
+
+  /* Validar CRC (CMD_PING pasa incluso con CRC incorrecto) */
+  uint16_t calcCrc = SpiCrc16(payload, payloadLen);
+  if ((calcCrc == rxCrc) || (hdr->cmd == CMD_PING))
+  {
+    g_spiPacketCount++;
+    /* SpiHandleCommand llama SpiEnqueueResponse, que arma Txn 2
+     * o llama SpiRearmReceive para fire-and-forget */
+    SpiHandleCommand(hdr->cmd, payload, payloadLen, seq);
+  }
+  else
+  {
+    g_spiErrorCount++;
+    g_spiCrcErrorCount++;
+    SpiRearmReceive();
+  }
+}
+
+/* Callbacks DMA circular I2S: setean flag para que main loop rellene la mitad libre */
+void HAL_I2S_TxHalfCpltCallback(I2S_HandleTypeDef *hi2s)
+{
+  if (hi2s->Instance == SPI2) {
+    g_audioFillHalf = 0U;
+    g_audioLastCbTick = HAL_GetTick();
+  }
+}
+void HAL_I2S_TxCpltCallback(I2S_HandleTypeDef *hi2s)
+{
+  if (hi2s->Instance == SPI2) {
+    g_audioFillHalf = 1U;
+    g_audioLastCbTick = HAL_GetTick();
+  }
+}
+
+/* Txn 2 completada: respuesta enviada, rearmar para siguiente Txn 1 */
+void HAL_SPI_TxCpltCallback(SPI_HandleTypeDef *hspi)
+{
+  if (hspi->Instance == SPI1)
+    SpiRearmReceive();
 }
 
 static void ProcessSequencerStep(void)
@@ -2018,7 +2381,7 @@ static void RenderDemoBuffer(uint16_t *dst, uint32_t words)
   uint32_t frames = words / 2U;
   for (uint32_t i = 0; i < frames; i++)
   {
-    if (g_samplesToNextStep == 0)
+    if (g_demoSeqEnabled && g_samplesToNextStep == 0)
     {
       ProcessSequencerStep();
       uint32_t swing = g_fxSparkleOn ? (g_samplesPerStep / 8U) : (g_samplesPerStep / 12U);
@@ -2028,7 +2391,7 @@ static void RenderDemoBuffer(uint16_t *dst, uint32_t words)
         g_samplesToNextStep = g_samplesPerStep - swing;
       if (g_samplesToNextStep < 8U) g_samplesToNextStep = 8U;
     }
-    g_samplesToNextStep--;
+    if (g_demoSeqEnabled && g_samplesToNextStep > 0U) g_samplesToNextStep--;
 
     int32_t mixL = 0;
     int32_t mixR = 0;
@@ -2153,7 +2516,9 @@ static void RenderDemoBuffer(uint16_t *dst, uint32_t words)
         g_trackFlangerBuf[track][wp] = ClipS16(writeVal);
         s = ((s * (256 - g_trackFlanger[track].mixQ8)) + ((s + delayed) * g_trackFlanger[track].mixQ8)) >> 8;
         g_trackFlanger[track].writePos = (uint16_t)((wp + 1U) % TRACK_FX_BUF_SAMPLES);
-        g_trackFlanger[track].phase = (uint16_t)((g_trackFlanger[track].phase + 3U) & 0x01FFU);
+        uint8_t st = g_trackFlanger[track].rateStep;
+        if (st == 0U) st = 3U;
+        g_trackFlanger[track].phase = (uint16_t)((g_trackFlanger[track].phase + st) & 0x01FFU);
       }
 
       if (g_trackComp[track].active)
@@ -2267,9 +2632,16 @@ static void RenderDemoBuffer(uint16_t *dst, uint32_t words)
       uint32_t depth = g_flangerDepth;
       uint32_t tap = 12U + ((tri * depth) >> 8);
       uint32_t idxF = (g_delayIdx + DELAY_SAMPLES - tap) % DELAY_SAMPLES;
-      outL += ((int32_t)g_delayL[idxF] * g_flangerMixQ8) >> 9;
-      outR += ((int32_t)g_delayR[idxF] * g_flangerMixQ8) >> 9;
-      g_flangerPhase += g_fxSparkleOn ? 5U : 3U;
+      int32_t dL = g_delayL[idxF];
+      int32_t dR = g_delayR[idxF];
+      int32_t fbL = (dL * g_flangerFeedbackQ8) >> 9;
+      int32_t fbR = (dR * g_flangerFeedbackQ8) >> 9;
+      outL += ((dL + fbL) * g_flangerMixQ8) >> 9;
+      outR += ((dR + fbR) * g_flangerMixQ8) >> 9;
+      uint8_t st = g_flangerRateStep;
+      if (g_fxSparkleOn) st = (uint8_t)(st + 2U);
+      if (st < 1U) st = 1U;
+      g_flangerPhase += st;
       if (g_flangerPhase >= 512U) g_flangerPhase = 0;
     }
 
@@ -2377,44 +2749,93 @@ int main(void)
   MX_I2S2_Init();
   Debug_LED_Blink(2);
 
-  g_spiTxByte = 0;
-  g_spiRxByte = 0;
-  if (HAL_SPI_TransmitReceive_IT(&hspi1, (uint8_t*)&g_spiTxByte, (uint8_t*)&g_spiRxByte, 1) != HAL_OK) Error_Handler();
+  /* Armar recepción SPI slave: esperar Txn 1 del master */
+  SpiRearmReceive();
 
   memset(g_samples, 0, sizeof(g_samples));
-  if (LoadInstrumentFromFolder("BD", &g_samples[0]) != 0) Error_Handler();
-  if (LoadInstrumentFromFolder("SD", &g_samples[1]) != 0) Error_Handler();
-  if (LoadInstrumentFromFolder("CH", &g_samples[2]) != 0) Error_Handler();
-  if (LoadInstrumentFromFolder("OH", &g_samples[3]) != 0) Error_Handler();
-  if (LoadInstrumentFromFolder("CP", &g_samples[4]) != 0) Error_Handler();
+  g_samplesLoadedMask = 0U;
+
+  /* ── Mapa SD: pad → (carpeta, fichero WAV) ──────────────────────────
+   * Carpeta "RED 808 KARZ" → nombre 8.3 en FAT32: "RED808~1"
+   * Pads 8,9,15 vienen de subcarpetas /LT/ /MT/ /LC/ (primer WAV)
+   * NULL en fichero = sin carga SD, el ESP32 envía el sample por SPI
+   * ─────────────────────────────────────────────────────────────────── */
+  typedef struct { const char *dir; const char *file; } PadSrc;
+  static const PadSrc map[NUM_INSTRUMENTS] = {
+    { "RED808~1", "808 BD 3-1.wav" },  /* 0  BD - Bass Drum           */
+    { "RED808~1", "808 SD 1-5.wav" },  /* 1  SD - Snare               */
+    { "RED808~1", "808 HH.wav"     },  /* 2  CH - Closed Hi-Hat       */
+    { "RED808~1", "808 OH 1.wav"   },  /* 3  OH - Open Hi-Hat         */
+    { "RED808~1", "808 CY 3-1.wav" },  /* 4  CY - Cymbal              */
+    { "RED808~1", "808 CP.wav"     },  /* 5  CP - Clap                */
+    { "RED808~1", "808 RS.wav"     },  /* 6  RS - Rimshot             */
+    { "RED808~1", "808 COW.wav"    },  /* 7  CB - Cowbell             */
+    { "LT",       NULL             },  /* 8  LT - Low Tom  (subdir)   */
+    { "MT",       NULL             },  /* 9  MT - Mid Tom  (subdir)   */
+    { "RED808~1", "808 HT 3.wav"   },  /* 10 HT - High Tom            */
+    { "RED808~1", "808 MA.wav"     },  /* 11 MA - Maracas             */
+    { "RED808~1", "808 CL.wav"     },  /* 12 CL - Claves              */
+    { "RED808~1", "808 HC 1.wav"   },  /* 13 HC - Hi Conga            */
+    { "RED808~1", "808 MC 3.wav"   },  /* 14 MC - Mid Conga           */
+    { "LC",       NULL             },  /* 15 LC - Low Conga (subdir)  */
+  };
+
+  for (uint32_t i = 0; i < NUM_INSTRUMENTS; i++)
+  {
+    int ok = -1;
+    if (map[i].file != NULL)
+      ok = LoadInstrumentFromFile(map[i].dir, map[i].file, &g_samples[i]);
+    else if (map[i].dir != NULL)
+      ok = LoadInstrumentFromFolder(map[i].dir, &g_samples[i]);
+
+    if (ok != 0)
+      GenerateFallbackSample((uint8_t)i, &g_samples[i]);
+  }
 
   g_samplesPerStep = (DEMO_SAMPLE_RATE * 60U) / (DEMO_BPM * 4U);
   g_samplesToNextStep = 1;
   g_step = 0;
   g_songStep = 0;
+  g_demoSeqEnabled = 0U;   /* demo OFF: solo suena por triggers */
 
   HAL_GPIO_WritePin(DEBUG_LED2_PORT, DEBUG_LED2_PIN, GPIO_PIN_SET);
 
-  uint16_t *tx_bufs[2] = { i2sTxBufA, i2sTxBufB };
-  uint32_t tx_words = AUDIO_TX_WORDS;
-  uint32_t buf_index = 0;
+  /* Pre-render las dos mitades antes de arrancar el DMA circular */
+  RenderDemoBuffer(i2sBuf,                    AUDIO_TX_WORDS);  /* buf A */
+  RenderDemoBuffer(i2sBuf + AUDIO_TX_WORDS,   AUDIO_TX_WORDS);  /* buf B */
 
-  RenderDemoBuffer(tx_bufs[buf_index], tx_words);
-  if (HAL_I2S_Transmit_DMA(&hi2s2, tx_bufs[buf_index], tx_words) != HAL_OK) Error_Handler();
-  buf_index ^= 1U;
+  /* Arrancar DMA circular I2S — robusto ante HAL_BUSY */
+  g_audioFillHalf = 0xFFU;
+  g_audioLastCbTick = HAL_GetTick();
+  for (uint32_t tries = 0; tries < 6U; tries++)
+  {
+    if (HAL_I2S_Transmit_DMA(&hi2s2, i2sBuf, AUDIO_TX_WORDS_FULL) == HAL_OK) break;
+    HAL_I2S_DMAStop(&hi2s2);
+    HAL_Delay(1);
+    if (tries == 5U) Error_Handler();
+  }
 
   while (1)
   {
-    ProcessSpiTriggers();
-    RenderDemoBuffer(tx_bufs[buf_index], tx_words);
-
-    while (HAL_I2S_GetState(&hi2s2) == HAL_I2S_STATE_BUSY_TX)
+    /* Watchdog audio: si no llegan callbacks, reiniciar DMA */
+    if ((HAL_GetTick() - g_audioLastCbTick) > 120U)
     {
-      HAL_GPIO_TogglePin(DEBUG_LED_PORT, DEBUG_LED_PIN);
+      g_audioFillHalf = 0xFFU;
+      RenderDemoBuffer(i2sBuf,                    AUDIO_TX_WORDS);
+      RenderDemoBuffer(i2sBuf + AUDIO_TX_WORDS,   AUDIO_TX_WORDS);
+      HAL_I2S_DMAStop(&hi2s2);
+      if (HAL_I2S_Transmit_DMA(&hi2s2, i2sBuf, AUDIO_TX_WORDS_FULL) == HAL_OK)
+        g_audioLastCbTick = HAL_GetTick();
     }
 
-    if (HAL_I2S_Transmit_DMA(&hi2s2, tx_bufs[buf_index], tx_words) == HAL_OK)
-      buf_index ^= 1U;
+    /* El callback I2S setea g_audioFillHalf=0 (1ª mitad) o =1 (2ª mitad) */
+    if (g_audioFillHalf != 0xFFU)
+    {
+      uint8_t free_half = g_audioFillHalf;
+      g_audioFillHalf = 0xFFU;
+      ProcessSpiTriggers();
+      RenderDemoBuffer(i2sBuf + free_half * AUDIO_TX_WORDS, AUDIO_TX_WORDS);
+    }
   }
 }
 
@@ -2484,8 +2905,13 @@ static void MX_SPI1_Init(void)
 static void MX_DMA_Init(void)
 {
   __HAL_RCC_DMA1_CLK_ENABLE();
+  __HAL_RCC_DMA2_CLK_ENABLE();
+  /* I2S2 TX DMA1_Stream4 — máxima prioridad */
   HAL_NVIC_SetPriority(DMA1_Stream4_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(DMA1_Stream4_IRQn);
+  /* SPI1 RX DMA2_Stream0 — prioridad 2 */
+  HAL_NVIC_SetPriority(DMA2_Stream0_IRQn, 2, 0);
+  HAL_NVIC_EnableIRQ(DMA2_Stream0_IRQn);
 }
 
 static void MX_SDIO_SD_Init(void)

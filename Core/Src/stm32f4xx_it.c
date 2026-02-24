@@ -56,6 +56,7 @@
 
 /* External variables --------------------------------------------------------*/
 extern DMA_HandleTypeDef hdma_spi2_tx;
+extern DMA_HandleTypeDef hdma_spi1_rx;
 extern SPI_HandleTypeDef hspi1;
 /* USER CODE BEGIN EV */
 
@@ -205,6 +206,11 @@ void SysTick_Handler(void)
 void DMA1_Stream4_IRQHandler(void)
 {
   HAL_DMA_IRQHandler(&hdma_spi2_tx);
+}
+
+void DMA2_Stream0_IRQHandler(void)
+{
+  HAL_DMA_IRQHandler(&hdma_spi1_rx);
 }
 
 void DMA1_Stream5_IRQHandler(void)
