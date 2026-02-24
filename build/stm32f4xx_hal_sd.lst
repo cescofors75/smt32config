@@ -1,4 +1,4 @@
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 1
 
 
    1              		.cpu cortex-m4
@@ -58,7 +58,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
   28:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   [..]
   29:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****     This driver implements a high level communication layer for read and write from/to
   30:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****     this memory. The needed STM32 hardware resources (SDIO and GPIO) are performed by
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 2
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 2
 
 
   31:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****     the user in HAL_SD_MspInit() function (MSP layer).
@@ -118,7 +118,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
   85:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****         make sure that the SDIO_CK frequency doesn't exceed 400KHz.
   86:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** 
   87:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****         This phase of initialization is done through SDIO_Init() and
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 3
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 3
 
 
   88:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****         SDIO_PowerState_ON() SDIO low level APIs.
@@ -178,7 +178,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  142:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****     (+) You can write to SD card in polling mode by using function HAL_SD_WriteBlocks().
  143:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****         This function support only 512-bytes block length (the block size should be
  144:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****         chosen as 512 bytes).
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 4
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 4
 
 
  145:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****         You can choose either one block read operation or multiple block read operation
@@ -238,7 +238,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  199:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****     (+) __HAL_SD_DMA_DISABLE: Disable the SDIO DMA transfer
  200:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****     (+) __HAL_SD_ENABLE_IT: Enable the SD device interrupt
  201:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****     (+) __HAL_SD_DISABLE_IT: Disable the SD device interrupt
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 5
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 5
 
 
  202:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****     (+) __HAL_SD_GET_FLAG:Check whether the specified SD flag is set or not
@@ -298,7 +298,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  256:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   */
  257:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** 
  258:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** /* Includes ------------------------------------------------------------------*/
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 6
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 6
 
 
  259:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** #include "stm32f4xx_hal.h"
@@ -358,7 +358,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  313:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** 
  314:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** /** @addtogroup SD_Exported_Functions_Group1
  315:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****  *  @brief   Initialization and de-initialization functions
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 7
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 7
 
 
  316:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****  *
@@ -418,7 +418,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  370:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** #else
  371:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****     /* Init the low level hardware : GPIO, CLOCK, CORTEX...etc */
  372:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****     HAL_SD_MspInit(hsd);
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 8
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 8
 
 
  373:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** #endif /* USE_HAL_SD_REGISTER_CALLBACKS */
@@ -478,7 +478,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  427:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** 
  428:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   /* Required power up waiting time before starting the SD initialization  sequence */
  429:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   HAL_Delay(2);
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 9
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 9
 
 
  430:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** 
@@ -538,7 +538,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  484:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** #if defined (USE_HAL_SD_REGISTER_CALLBACKS) && (USE_HAL_SD_REGISTER_CALLBACKS == 1U)
  485:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   if(hsd->MspDeInitCallback == NULL)
  486:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   {
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 10
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 10
 
 
  487:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****     hsd->MspDeInitCallback = HAL_SD_MspDeInit;
@@ -598,7 +598,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  541:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** @verbatim
  542:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   ==============================================================================
  543:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****                         ##### IO operation functions #####
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 11
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 11
 
 
  544:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   ==============================================================================
@@ -658,7 +658,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  598:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****     }
  599:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** 
  600:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****     /* Configure the SD DPSM (Data Path State Machine) */
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 12
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 12
 
 
  601:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****     config.DataTimeOut   = SDMMC_DATATIMEOUT;
@@ -718,7 +718,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  655:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****           tempbuff++;
  656:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****           dataremaining--;
  657:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****           *tempbuff = (uint8_t)((data >> 24U) & 0xFFU);
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 13
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 13
 
 
  658:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****           tempbuff++;
@@ -778,7 +778,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  712:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****       hsd->State = HAL_SD_STATE_READY;
  713:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****       hsd->Context = SD_CONTEXT_NONE;
  714:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****       return HAL_ERROR;
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 14
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 14
 
 
  715:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****     }
@@ -838,7 +838,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  769:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   }
  770:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** }
  771:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** 
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 15
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 15
 
 
  772:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** /**
@@ -898,7 +898,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  826:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****     (void)SDIO_ConfigData(hsd->Instance, &config);
  827:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** 
  828:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****     /* Write Blocks in Polling mode */
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 16
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 16
 
 
  829:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****     if(NumberOfBlocks > 1U)
@@ -958,7 +958,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  883:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****       {
  884:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****         /* Clear all the static flags */
  885:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****         __HAL_SD_CLEAR_FLAG(hsd, SDIO_STATIC_FLAGS);
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 17
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 17
 
 
  886:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****         hsd->ErrorCode |= errorstate;
@@ -1018,7 +1018,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  940:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****       hsd->State = HAL_SD_STATE_READY;
  941:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****       hsd->Context = SD_CONTEXT_NONE;
  942:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****       return HAL_ERROR;
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 18
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 18
 
 
  943:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****     }
@@ -1078,7 +1078,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  997:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** 
  998:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****     hsd->State = HAL_SD_STATE_BUSY;
  999:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** 
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 19
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 19
 
 
 1000:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****     /* Initialize data control register */
@@ -1138,7 +1138,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
 1054:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   {
 1055:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****     return HAL_BUSY;
 1056:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   }
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 20
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 20
 
 
 1057:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** }
@@ -1198,7 +1198,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
 1111:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****       add *= 512U;
 1112:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****     }
 1113:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** 
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 21
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 21
 
 
 1114:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****     /* Write Blocks in Polling mode */
@@ -1258,7 +1258,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
 1168:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   */
 1169:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** HAL_StatusTypeDef HAL_SD_ReadBlocks_DMA(SD_HandleTypeDef *hsd, uint8_t *pData, uint32_t BlockAdd, u
 1170:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** {
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 22
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 22
 
 
 1171:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   SDIO_DataInitTypeDef config;
@@ -1318,7 +1318,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
 1225:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****     {
 1226:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****       /* Enable SD DMA transfer */
 1227:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****       __HAL_SD_DMA_ENABLE(hsd);
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 23
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 23
 
 
 1228:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** 
@@ -1378,7 +1378,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
 1282:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   * @note   You could also check the DMA transfer process through the SD Tx
 1283:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   *         interrupt event.
 1284:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   * @param  hsd: Pointer to SD handle
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 24
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 24
 
 
 1285:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   * @param  pData: Pointer to the buffer that will contain the data to transmit
@@ -1438,7 +1438,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
 1339:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****     if(NumberOfBlocks > 1U)
 1340:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****     {
 1341:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****       hsd->Context = (SD_CONTEXT_WRITE_MULTIPLE_BLOCK | SD_CONTEXT_DMA);
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 25
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 25
 
 
 1342:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** 
@@ -1498,7 +1498,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
 1396:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****     }
 1397:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   }
 1398:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   else
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 26
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 26
 
 
 1399:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   {
@@ -1558,7 +1558,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
 1453:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****       return HAL_ERROR;
 1454:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****     }
 1455:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** 
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 27
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 27
 
 
 1456:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****     /* Get start and end block for high capacity cards */
@@ -1618,7 +1618,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
 1510:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** /**
 1511:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   * @brief  This function handles SD card interrupt request.
 1512:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   * @param  hsd: Pointer to SD handle
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 28
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 28
 
 
 1513:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   * @retval None
@@ -1678,7 +1678,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
 1567:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** #else
 1568:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****         HAL_SD_RxCpltCallback(hsd);
 1569:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** #endif /* USE_HAL_SD_REGISTER_CALLBACKS */
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 29
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 29
 
 
 1570:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****       }
@@ -1738,7 +1738,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
 1624:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   else if(__HAL_SD_GET_FLAG(hsd, SDIO_FLAG_DCRCFAIL | SDIO_FLAG_DTIMEOUT | SDIO_FLAG_RXOVERR | SDIO
 1625:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** #endif /* SDIO_STA_STBITERR */
 1626:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   {
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 30
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 30
 
 
 1627:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****     /* Set Error code */
@@ -1798,7 +1798,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
 1681:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****     {
 1682:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****       /* Abort the SD DMA channel */
 1683:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****       if(((context & SD_CONTEXT_WRITE_SINGLE_BLOCK) != 0U) || ((context & SD_CONTEXT_WRITE_MULTIPLE
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 31
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 31
 
 
 1684:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****       {
@@ -1858,7 +1858,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
 1738:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** * @param  hsd : Pointer to a SD_HandleTypeDef structure that contains
 1739:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   *              the configuration information.
 1740:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** * @retval SD Error Code
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 32
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 32
 
 
 1741:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** */
@@ -1918,7 +1918,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
 1795:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   * @retval None
 1796:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   */
 1797:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** __weak void HAL_SD_AbortCallback(SD_HandleTypeDef *hsd)
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 33
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 33
 
 
 1798:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** {
@@ -1978,7 +1978,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
 1852:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****       break;
 1853:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****     case HAL_SD_MSP_INIT_CB_ID :
 1854:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****       hsd->MspInitCallback = pCallback;
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 34
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 34
 
 
 1855:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****       break;
@@ -2038,7 +2038,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
 1909:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   *          @arg @ref HAL_SD_MSP_DEINIT_CB_ID SD MspDeInit Callback ID
 1910:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   * @retval status
 1911:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   */
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 35
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 35
 
 
 1912:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** HAL_StatusTypeDef HAL_SD_UnRegisterCallback(SD_HandleTypeDef *hsd, HAL_SD_CallbackIDTypeDef Callbac
@@ -2098,7 +2098,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
 1966:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   }
 1967:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   else
 1968:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   {
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 36
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 36
 
 
 1969:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****     /* Update the error code */
@@ -2158,7 +2158,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
 2023:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** 
 2024:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   pCID->ManufactDate = (uint16_t)((hsd->CID[3] & 0x000FFF00U) >> 8U);
 2025:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** 
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 37
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 37
 
 
 2026:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   pCID->CID_CRC = (uint8_t)((hsd->CID[3] & 0x000000FEU) >> 1U);
@@ -2218,7 +2218,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
 2080:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** 
 2081:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****     pCSD->DeviceSizeMul = (uint8_t)((hsd->CSD[2] & 0x00038000U) >> 15U);
 2082:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** 
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 38
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 38
 
 
 2083:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****     hsd->SdCard.BlockNbr  = (pCSD->DeviceSize + 1U) ;
@@ -2278,7 +2278,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
 2137:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   pCSD->FileFormat = (uint8_t)((hsd->CSD[3] & 0x00000C00U) >> 10U);
 2138:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** 
 2139:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   pCSD->ECC= (uint8_t)((hsd->CSD[3] & 0x00000300U) >> 8U);
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 39
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 39
 
 
 2140:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** 
@@ -2338,7 +2338,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
 2194:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   /* Set Block Size for Card */
 2195:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   errorstate = SDMMC_CmdBlockLength(hsd->Instance, BLOCKSIZE);
 2196:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   if(errorstate != HAL_SD_ERROR_NONE)
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 40
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 40
 
 
 2197:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   {
@@ -2398,7 +2398,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
 2251:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** 
 2252:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   if(hsd->SdCard.CardType != CARD_SECURED)
 2253:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   {
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 41
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 41
 
 
 2254:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****     if(WideMode == SDIO_BUS_WIDE_8B)
@@ -2458,7 +2458,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
 2308:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****     status = HAL_ERROR;
 2309:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   }
 2310:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** 
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 42
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 42
 
 
 2311:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   /* Change State */
@@ -2518,7 +2518,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
 2365:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****     if (((context & SD_CONTEXT_WRITE_SINGLE_BLOCK) != 0U) || ((context & SD_CONTEXT_WRITE_MULTIPLE_
 2366:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****     {
 2367:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****       if(HAL_DMA_Abort(hsd->hdmatx) != HAL_OK)
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 43
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 43
 
 
 2368:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****       {
@@ -2578,7 +2578,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
 2422:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****     /* Disable the SD DMA request */
 2423:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****     hsd->Instance->DCTRL &= (uint32_t)~((uint32_t)SDIO_DCTRL_DMAEN);
 2424:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** 
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 44
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 44
 
 
 2425:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****     /* Abort the SD DMA Tx channel */
@@ -2638,7 +2638,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
 2479:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   * @}
 2480:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   */
 2481:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** 
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 45
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 45
 
 
 2482:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** /**
@@ -2698,7 +2698,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
 2507:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   * @retval None
 2508:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   */
 2509:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** static void SD_DMAReceiveCplt(DMA_HandleTypeDef *hdma)
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 46
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 46
 
 
 2510:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** {
@@ -2758,7 +2758,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
 2564:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****       /* Clear All flags */
 2565:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****       __HAL_SD_CLEAR_FLAG(hsd, SDIO_STATIC_FLAGS);
 2566:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** 
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 47
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 47
 
 
 2567:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****       /* Disable All interrupts */
@@ -2818,7 +2818,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
 2621:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** #if (USE_HAL_SD_REGISTER_CALLBACKS == 1)
 2622:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****     hsd->ErrorCallback(hsd);
 2623:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** #else
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 48
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 48
 
 
 2624:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****     HAL_SD_ErrorCallback(hsd);
@@ -2878,7 +2878,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
 2678:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** 
 2679:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   /* Check the power State */
 2680:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   if(SDIO_GetPowerState(hsd->Instance) == 0U)
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 49
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 49
 
 
 2681:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   {
@@ -2938,7 +2938,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
 2735:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   /* Get the Card Class */
 2736:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   hsd->SdCard.Class = (SDIO_GetResponse(hsd->Instance, SDIO_RESP2) >> 20U);
 2737:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** 
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 50
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 50
 
 
 2738:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   /* Get CSD parameters */
@@ -2998,7 +2998,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
   82              		.loc 1 2769 3 view .LVU11
 2770:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** 
 2771:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   /* CMD0: GO_IDLE_STATE */
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 51
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 51
 
 
 2772:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   errorstate = SDMMC_CmdGoIdleState(hsd->Instance);
@@ -3058,7 +3058,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
 2813:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****       return errorstate;
 2814:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****     }
 2815:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** 
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 52
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 52
 
 
 2816:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****     /* Send CMD41 */
@@ -3118,7 +3118,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  114              	.LVL11:
 2780:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   {
  115              		.loc 1 2780 3 is_stmt 1 view .LVU21
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 53
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 53
 
 
 2780:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   {
@@ -3178,7 +3178,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  154 0040 0546     		mov	r5, r0
  155 0042 E7E7     		b	.L2
  156              	.L20:
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 54
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 54
 
 
 2799:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****     if(errorstate != HAL_SD_ERROR_NONE)
@@ -3238,7 +3238,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  196 006c FFF7FEFF 		bl	SDMMC_CmdAppCommand
  197              	.LVL21:
 2811:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****     {
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 55
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 55
 
 
  198              		.loc 1 2811 5 is_stmt 1 view .LVU53
@@ -3298,7 +3298,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  236 008e 019A     		ldr	r2, [sp, #4]
 2832:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   {
  237              		.loc 1 2832 5 view .LVU70
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 56
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 56
 
 
  238 0090 4FF6FE73 		movw	r3, #65534
@@ -3358,7 +3358,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  283              		.thumb
  284              		.thumb_func
  286              	SD_PowerOFF:
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 57
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 57
 
 
  287              	.LVL32:
@@ -3418,7 +3418,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
 2872:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   uint32_t tickstart = HAL_GetTick();
 2873:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   uint32_t count;
 2874:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   uint32_t *pData = pSDstatus;
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 58
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 58
 
 
 2875:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** 
@@ -3478,7 +3478,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
 2929:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****       return HAL_SD_ERROR_TIMEOUT;
 2930:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****     }
 2931:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   }
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 59
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 59
 
 
 2932:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** 
@@ -3538,7 +3538,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
 2986:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** 
 2987:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   /* Send Status command */
 2988:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   errorstate = SDMMC_CmdSendStatus(hsd->Instance, (uint32_t)(hsd->SdCard.RelCardAdd << 16U));
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 60
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 60
 
 
 2989:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   if(errorstate != HAL_SD_ERROR_NONE)
@@ -3598,7 +3598,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
 3043:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****     return HAL_SD_ERROR_REQUEST_NOT_APPLICABLE;
 3044:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   }
 3045:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** }
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 61
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 61
 
 
 3046:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** 
@@ -3658,7 +3658,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
 3100:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   */
 3101:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** static uint32_t SD_FindSCR(SD_HandleTypeDef *hsd, uint32_t *pSCR)
 3102:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** {
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 62
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 62
 
 
 3103:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   SDIO_DataInitTypeDef config;
@@ -3718,7 +3718,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
 3157:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** #if defined(SDIO_STA_STBITERR)
 3158:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   if(__HAL_SD_GET_FLAG(hsd, SDIO_FLAG_DTIMEOUT) || (__HAL_SD_GET_FLAG(hsd, SDIO_FLAG_STBITERR)))
 3159:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** #else /* SDIO_STA_STBITERR not defined */
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 63
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 63
 
 
 3160:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   if(__HAL_SD_GET_FLAG(hsd, SDIO_FLAG_DTIMEOUT))
@@ -3778,7 +3778,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  330              		.cfi_offset 5, -16
  331              		.cfi_offset 6, -12
  332              		.cfi_offset 7, -8
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 64
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 64
 
 
  333              		.cfi_offset 14, -4
@@ -3838,7 +3838,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  355 000a 3868     		ldr	r0, [r7]
  356 000c FFF7FEFF 		bl	SDIO_ReadFIFO
  357              	.LVL40:
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 65
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 65
 
 
 3216:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****       tmp++;
@@ -3898,7 +3898,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  391              		.loc 1 3227 20 is_stmt 0 view .LVU120
  392 0024 043E     		subs	r6, r6, #4
  393              	.LVL46:
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 66
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 66
 
 
 3213:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****     {
@@ -3958,7 +3958,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  434              	.LCFI6:
  435              		.cfi_def_cfa_offset 20
  436              		.cfi_offset 4, -20
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 67
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 67
 
 
  437              		.cfi_offset 5, -16
@@ -4018,7 +4018,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  461              	.LCFI8:
  462              		.cfi_remember_state
  463              		.cfi_def_cfa_offset 20
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 68
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 68
 
 
  464              		@ sp needed
@@ -4078,7 +4078,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  500 0024 43EA0263 		orr	r3, r3, r2, lsl #24
  501 0028 0193     		str	r3, [sp, #4]
 3264:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****       dataremaining--;
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 69
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 69
 
 
  502              		.loc 1 3264 7 is_stmt 1 view .LVU159
@@ -4138,7 +4138,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  545              		.thumb_func
  547              	SD_SendSDStatus:
  548              	.LVL62:
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 70
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 70
 
 
  549              	.LFB169:
@@ -4198,7 +4198,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
 2883:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   if(errorstate != HAL_SD_ERROR_NONE)
  590              		.loc 1 2883 3 is_stmt 1 view .LVU187
 2883:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   if(errorstate != HAL_SD_ERROR_NONE)
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 71
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 71
 
 
  591              		.loc 1 2883 16 is_stmt 0 view .LVU188
@@ -4258,7 +4258,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  628              		.loc 1 2895 5 is_stmt 1 view .LVU205
 2895:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   }
  629              		.loc 1 2895 12 is_stmt 0 view .LVU206
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 72
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 72
 
 
  630 0040 59E0     		b	.L37
@@ -4318,7 +4318,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  667 0066 FFF7FEFF 		bl	SDMMC_CmdStatusRegister
  668              	.LVL72:
 2909:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   {
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 73
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 73
 
 
  669              		.loc 1 2909 3 is_stmt 1 view .LVU224
@@ -4378,7 +4378,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  707              		.loc 1 2927 7 discriminator 1 view .LVU240
  708 008a B0F1FF3F 		cmp	r0, #-1
  709 008e 35D0     		beq	.L49
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 74
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 74
 
 
  710              	.L41:
@@ -4438,7 +4438,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  747              		.loc 1 2945 10 view .LVU257
  748 00c0 13F0200F 		tst	r3, #32
  749 00c4 23D1     		bne	.L57
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 75
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 75
 
 
  750              	.L46:
@@ -4498,7 +4498,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  789              		.loc 1 2969 1 view .LVU272
  790 00f6 1846     		mov	r0, r3
  791 00f8 07B0     		add	sp, sp, #28
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 76
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 76
 
 
  792              	.LCFI12:
@@ -4558,7 +4558,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  842              		.cfi_offset 7, -8
  843              		.cfi_offset 14, -4
  844 0002 89B0     		sub	sp, sp, #36
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 77
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 77
 
 
  845              	.LCFI15:
@@ -4618,7 +4618,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  884              		.cfi_remember_state
  885              		.cfi_def_cfa_offset 20
  886              		@ sp needed
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 78
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 78
 
 
  887 0024 F0BD     		pop	{r4, r5, r6, r7, pc}
@@ -4678,7 +4678,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  925 0048 0023     		movs	r3, #0
  926 004a 0693     		str	r3, [sp, #24]
 3129:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   (void)SDIO_ConfigData(hsd->Instance, &config);
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 79
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 79
 
 
  927              		.loc 1 3129 3 is_stmt 1 view .LVU310
@@ -4738,7 +4738,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
 3151:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****     {
  966              		.loc 1 3151 23 discriminator 1 view .LVU326
  967 0072 831B     		subs	r3, r0, r6
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 80
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 80
 
 
 3151:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****     {
@@ -4798,7 +4798,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  1005              		.loc 1 3167 11 is_stmt 0 view .LVU343
  1006 00a4 436B     		ldr	r3, [r0, #52]
 3167:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   {
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 81
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 81
 
 
  1007              		.loc 1 3167 10 view .LVU344
@@ -4858,7 +4858,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
 3188:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****             ((tempscr[0] & SDMMC_16TO23BITS) >> 8) | ((tempscr[0] & SDMMC_24TO31BITS) >> 24));
  1045              		.loc 1 3188 52 view .LVU361
  1046 00dc 43EA0263 		orr	r3, r3, r2, lsl #24
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 82
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 82
 
 
 3189:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** 
@@ -4918,7 +4918,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  1084              		.loc 1 3177 12 is_stmt 0 view .LVU378
  1085 0100 8EE7     		b	.L59
  1086              	.LVL109:
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 83
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 83
 
 
  1087              	.L70:
@@ -4978,7 +4978,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  1132              		.loc 1 3010 5 discriminator 1 view .LVU389
  1133 0012 10F0007F 		tst	r0, #33554432
  1134 0016 13D1     		bne	.L78
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 84
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 84
 
 
 3016:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   if(errorstate != HAL_SD_ERROR_NONE)
@@ -5038,7 +5038,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  1173              	.L78:
 3012:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   }
  1174              		.loc 1 3012 12 is_stmt 0 view .LVU406
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 85
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 85
 
 
  1175 0040 4FF40060 		mov	r0, #2048
@@ -5098,7 +5098,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
 3055:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** 
  1224              		.loc 1 3055 3 is_stmt 1 view .LVU414
 3057:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   {
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 86
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 86
 
 
  1225              		.loc 1 3057 3 view .LVU415
@@ -5158,7 +5158,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
 3080:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****     if(errorstate != HAL_SD_ERROR_NONE)
  1263              		.loc 1 3080 18 is_stmt 0 view .LVU432
  1264 0036 0021     		movs	r1, #0
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 87
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 87
 
 
  1265 0038 2068     		ldr	r0, [r4]
@@ -5218,7 +5218,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  1313              		.cfi_offset 4, -16
  1314              		.cfi_offset 5, -12
  1315              		.cfi_offset 6, -8
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 88
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 88
 
 
  1316              		.cfi_offset 14, -4
@@ -5278,7 +5278,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  1355              		.loc 1 2997 3 is_stmt 1 view .LVU455
 2997:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** }
  1356              		.loc 1 2997 10 is_stmt 0 view .LVU456
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 89
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 89
 
 
  1357 0024 F7E7     		b	.L86
@@ -5338,7 +5338,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  1409              		.align	1
  1410              		.global	HAL_SD_DeInit
  1411              		.syntax unified
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 90
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 90
 
 
  1412              		.thumb
@@ -5398,7 +5398,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  1452              		.loc 1 501 1 is_stmt 0 view .LVU478
  1453 001e 10BD     		pop	{r4, pc}
  1454              	.LVL147:
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 91
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 91
 
 
  1455              	.L95:
@@ -5458,7 +5458,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  569:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   uint32_t count, data, dataremaining;
  1505              		.loc 1 569 3 view .LVU485
  569:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   uint32_t count, data, dataremaining;
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 92
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 92
 
 
  1506              		.loc 1 569 24 is_stmt 0 view .LVU486
@@ -5518,7 +5518,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  1542 003e 2B68     		ldr	r3, [r5]
  593:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** 
  1543              		.loc 1 593 26 view .LVU505
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 93
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 93
 
 
  1544 0040 0022     		movs	r2, #0
@@ -5578,7 +5578,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  1580 0064 0123     		movs	r3, #1
  1581 0066 0593     		str	r3, [sp, #20]
  607:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** 
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 94
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 94
 
 
  1582              		.loc 1 607 5 is_stmt 1 view .LVU524
@@ -5638,7 +5638,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  576:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****     return HAL_ERROR;
  1620              		.loc 1 576 20 view .LVU541
  1621 008a 43F00063 		orr	r3, r3, #134217728
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 95
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 95
 
 
  1622 008e AB63     		str	r3, [r5, #56]
@@ -5698,7 +5698,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  1661 00b8 AB63     		str	r3, [r5, #56]
  629:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****       hsd->Context = SD_CONTEXT_NONE;
  1662              		.loc 1 629 7 is_stmt 1 view .LVU557
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 96
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 96
 
 
  629:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****       hsd->Context = SD_CONTEXT_NONE;
@@ -5758,7 +5758,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  1701 00ea ECD0     		beq	.L110
  642:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****       {
  1702              		.loc 1 642 53 discriminator 1 view .LVU574
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 97
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 97
 
 
  1703 00ec 002F     		cmp	r7, #0
@@ -5818,7 +5818,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  1738              		.loc 1 657 23 is_stmt 0 view .LVU593
  1739 0108 000E     		lsrs	r0, r0, #24
  1740              	.LVL167:
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 98
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 98
 
 
  657:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****           tempbuff++;
@@ -5878,7 +5878,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  1778 012c 4FF0030B 		mov	fp, #3
  1779 0130 88E0     		b	.L102
  1780              	.L127:
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 99
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 99
 
 
  675:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****     {
@@ -5938,7 +5938,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  1818 0160 5A6B     		ldr	r2, [r3, #52]
  716:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****     {
  1819              		.loc 1 716 12 view .LVU628
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 100
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 100
 
 
  1820 0162 12F0200F 		tst	r2, #32
@@ -5998,7 +5998,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  741:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****       dataremaining--;
  1856              		.loc 1 741 7 is_stmt 1 view .LVU647
  1857              	.LVL176:
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 101
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 101
 
 
  742:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****       *tempbuff = (uint8_t)((data >> 24U) & 0xFFU);
@@ -6058,7 +6058,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  1895 01ae AB63     		str	r3, [r5, #56]
  752:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****         hsd->Context = SD_CONTEXT_NONE;
  1896              		.loc 1 752 9 is_stmt 1 view .LVU665
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 102
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 102
 
 
  752:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****         hsd->Context = SD_CONTEXT_NONE;
@@ -6118,7 +6118,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  1934 01d8 0023     		movs	r3, #0
  1935 01da 2B63     		str	r3, [r5, #48]
  688:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****         }
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 103
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 103
 
 
  1936              		.loc 1 688 11 is_stmt 1 view .LVU683
@@ -6178,7 +6178,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  1973 0202 0123     		movs	r3, #1
  1974 0204 85F83430 		strb	r3, [r5, #52]
  713:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****       return HAL_ERROR;
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 104
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 104
 
 
  1975              		.loc 1 713 7 is_stmt 1 view .LVU701
@@ -6238,7 +6238,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  763:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   }
  2012              		.loc 1 763 12 is_stmt 0 view .LVU719
  2013 0232 4FF0000B 		mov	fp, #0
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 105
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 105
 
 
  2014 0236 05E0     		b	.L102
@@ -6298,7 +6298,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  2061              		.cfi_def_cfa_offset 36
  2062              		.cfi_offset 4, -36
  2063              		.cfi_offset 5, -32
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 106
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 106
 
 
  2064              		.cfi_offset 6, -28
@@ -6358,7 +6358,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  803:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****     {
  2104              		.loc 1 803 5 is_stmt 1 view .LVU743
  803:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****     {
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 107
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 107
 
 
  2105              		.loc 1 803 13 is_stmt 0 view .LVU744
@@ -6418,7 +6418,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  822:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****     config.TransferDir   = SDIO_TRANSFER_DIR_TO_CARD;
  2142              		.loc 1 822 5 is_stmt 1 view .LVU762
  822:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****     config.TransferDir   = SDIO_TRANSFER_DIR_TO_CARD;
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 108
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 108
 
 
  2143              		.loc 1 822 26 is_stmt 0 view .LVU763
@@ -6478,7 +6478,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  843:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****     {
  2182              		.loc 1 843 5 is_stmt 1 view .LVU779
  843:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****     {
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 109
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 109
 
 
  2183              		.loc 1 843 7 is_stmt 0 view .LVU780
@@ -6538,7 +6538,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  841:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****     }
  2221              		.loc 1 841 7 is_stmt 1 view .LVU797
  841:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****     }
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 110
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 110
 
 
  2222              		.loc 1 841 20 is_stmt 0 view .LVU798
@@ -6598,7 +6598,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  2262 00d2 C01B     		subs	r0, r0, r7
  882:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****       {
  2263              		.loc 1 882 9 discriminator 1 view .LVU813
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 111
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 111
 
 
  2264 00d4 4845     		cmp	r0, r9
@@ -6658,7 +6658,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  2302 0100 6278     		ldrb	r2, [r4, #1]	@ zero_extendqisi2
  869:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****           tempbuff++;
  2303              		.loc 1 869 16 view .LVU830
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 112
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 112
 
 
  2304 0102 43EA0223 		orr	r3, r3, r2, lsl #8
@@ -6718,7 +6718,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  864:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****         {
  2341              		.loc 1 864 42 is_stmt 0 discriminator 3 view .LVU848
  2342 0128 E6E7     		b	.L144
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 113
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 113
 
 
  2343              	.LVL210:
@@ -6778,7 +6778,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  896:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****       {
  2381              		.loc 1 896 9 view .LVU865
  2382 0158 032B     		cmp	r3, #3
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 114
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 114
 
 
  2383 015a 1CD1     		bne	.L158
@@ -6838,7 +6838,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  2420              		.loc 1 940 18 is_stmt 0 view .LVU882
  2421 018a 0123     		movs	r3, #1
  2422 018c 85F83430 		strb	r3, [r5, #52]
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 115
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 115
 
 
  941:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****       return HAL_ERROR;
@@ -6898,7 +6898,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  907:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****         }
  2460              		.loc 1 907 18 is_stmt 0 view .LVU900
  2461 01b6 26E0     		b	.L135
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 116
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 116
 
 
  2462              	.LVL214:
@@ -6958,7 +6958,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  932:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****       return HAL_ERROR;
  2499              		.loc 1 932 20 is_stmt 0 view .LVU918
  2500 01e2 0023     		movs	r3, #0
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 117
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 117
 
 
  2501 01e4 2B63     		str	r3, [r5, #48]
@@ -7018,7 +7018,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  2540              		.loc 1 961 1 view .LVU933
  2541 020e 00BF     		.align	2
  2542              	.L160:
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 118
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 118
 
 
  2543 0210 FF054000 		.word	4195839
@@ -7078,7 +7078,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  988:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   {
  2590              		.loc 1 988 9 view .LVU943
  2591 0014 DFB2     		uxtb	r7, r3
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 119
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 119
 
 
  988:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   {
@@ -7138,7 +7138,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  2628 0038 0168     		ldr	r1, [r0]
  2629 003a CB6B     		ldr	r3, [r1, #60]
  2630 003c 43F40343 		orr	r3, r3, #33536
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 120
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 120
 
 
  2631 0040 43F02A03 		orr	r3, r3, #42
@@ -7198,7 +7198,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
 1024:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** 
  2668              		.loc 1 1024 5 is_stmt 1 view .LVU979
 1024:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** 
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 121
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 121
 
 
  2669              		.loc 1 1024 11 is_stmt 0 view .LVU980
@@ -7258,7 +7258,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
 1047:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****       return HAL_ERROR;
  2708              		.loc 1 1047 7 is_stmt 1 view .LVU996
 1047:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****       return HAL_ERROR;
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 122
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 122
 
 
  2709              		.loc 1 1047 20 is_stmt 0 view .LVU997
@@ -7318,7 +7318,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  2747 00b2 2946     		mov	r1, r5
  2748 00b4 2068     		ldr	r0, [r4]
  2749 00b6 FFF7FEFF 		bl	SDMMC_CmdReadSingleBlock
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 123
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 123
 
 
  2750              	.LVL233:
@@ -7378,7 +7378,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  2801              		.cfi_offset 14, -4
  2802 0002 86B0     		sub	sp, sp, #24
  2803              	.LCFI40:
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 124
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 124
 
 
  2804              		.cfi_def_cfa_offset 40
@@ -7438,7 +7438,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
 1097:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** 
  2841              		.loc 1 1097 5 is_stmt 1 view .LVU1036
 1097:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** 
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 125
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 125
 
 
  2842              		.loc 1 1097 8 is_stmt 0 view .LVU1037
@@ -7498,7 +7498,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
 1117:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** 
  2880              		.loc 1 1117 20 is_stmt 0 view .LVU1054
  2881 004e 2823     		movs	r3, #40
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 126
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 126
 
 
  2882              	.LVL244:
@@ -7558,7 +7558,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  2919              		.loc 1 1080 8 is_stmt 0 view .LVU1071
  2920 0074 836B     		ldr	r3, [r0, #56]
  2921              	.LVL247:
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 127
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 127
 
 
 1080:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****     return HAL_ERROR;
@@ -7618,7 +7618,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  2960              		.loc 1 1140 26 is_stmt 0 view .LVU1087
  2961 0098 4FF0FF33 		mov	r3, #-1
  2962 009c 0093     		str	r3, [sp]
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 128
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 128
 
 
 1141:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****     config.DataBlockSize = SDIO_DATABLOCK_SIZE_512B;
@@ -7678,7 +7678,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  3000 00bc 06B0     		add	sp, sp, #24
  3001              	.LCFI41:
  3002              		.cfi_def_cfa_offset 16
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 129
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 129
 
 
  3003              		@ sp needed
@@ -7738,7 +7738,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  3051 000c 1F46     		mov	r7, r3
  3052 000e 0A46     		mov	r2, r1
  3053              	.LVL261:
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 130
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 130
 
 
 1181:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   {
@@ -7798,7 +7798,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  3090 0030 836B     		ldr	r3, [r0, #56]
  3091              	.LVL265:
 1177:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****     return HAL_ERROR;
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 131
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 131
 
 
  3092              		.loc 1 1177 20 view .LVU1131
@@ -7858,7 +7858,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
 1209:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** 
  3131              		.loc 1 1209 5 is_stmt 1 view .LVU1147
 1209:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** 
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 132
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 132
 
 
  3132              		.loc 1 1209 8 is_stmt 0 view .LVU1148
@@ -7918,7 +7918,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  3172 009c 00D0     		beq	.L195
 1231:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****       }
  3173              		.loc 1 1231 9 is_stmt 1 view .LVU1163
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 133
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 133
 
 
 1231:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****       }
@@ -7978,7 +7978,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
 1246:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** 
  3211              		.loc 1 1246 9 is_stmt 1 view .LVU1181
 1246:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** 
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 134
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 134
 
 
  3212              		.loc 1 1246 22 is_stmt 0 view .LVU1182
@@ -8038,7 +8038,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  3251 00f0 23F49573 		bic	r3, r3, #298
  3252 00f4 D363     		str	r3, [r2, #60]
 1219:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****       hsd->ErrorCode |= HAL_SD_ERROR_DMA;
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 135
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 135
 
 
  3253              		.loc 1 1219 7 view .LVU1198
@@ -8098,7 +8098,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  3294              		.cfi_def_cfa_offset 28
  3295              		@ sp needed
  3296 0120 BDE8F083 		pop	{r4, r5, r6, r7, r8, r9, pc}
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 136
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 136
 
 
  3297              	.LVL277:
@@ -8158,7 +8158,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
 1296:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   {
  3346              		.loc 1 1296 5 is_stmt 0 view .LVU1219
  3347 0006 0029     		cmp	r1, #0
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 137
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 137
 
 
  3348 0008 3BD0     		beq	.L216
@@ -8218,7 +8218,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
 1319:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** #else /* SDIO_STA_STBITERR not defined */
  3386              		.loc 1 1319 5 is_stmt 0 view .LVU1236
  3387 0034 C36B     		ldr	r3, [r0, #60]
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 138
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 138
 
 
  3388 0036 43F40673 		orr	r3, r3, #536
@@ -8278,7 +8278,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  3424              		.loc 1 1341 20 is_stmt 0 view .LVU1254
  3425 005c A023     		movs	r3, #160
  3426 005e 2363     		str	r3, [r4, #48]
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 139
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 139
 
 
 1344:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****     }
@@ -8338,7 +8338,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  3464              		.loc 1 1298 20 view .LVU1271
  3465 0084 43F00063 		orr	r3, r3, #134217728
  3466 0088 8363     		str	r3, [r0, #56]
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 140
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 140
 
 
 1299:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   }
@@ -8398,7 +8398,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  3505              		.loc 1 1367 33 view .LVU1287
  3506 00b0 4022     		movs	r2, #64
  3507 00b2 9A60     		str	r2, [r3, #8]
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 141
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 141
 
 
 1368:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** 
@@ -8458,7 +8458,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  3549              		.loc 1 1379 22 view .LVU1300
  3550 00ee 43F08043 		orr	r3, r3, #1073741824
  3551 00f2 A363     		str	r3, [r4, #56]
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 142
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 142
 
 
 1380:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****       hsd->Context = SD_CONTEXT_NONE;
@@ -8518,7 +8518,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
 1393:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** 
  3587              		.loc 1 1393 13 is_stmt 0 view .LVU1320
  3588 0116 6946     		mov	r1, sp
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 143
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 143
 
 
  3589 0118 2068     		ldr	r0, [r4]
@@ -8578,7 +8578,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  3638              		.cfi_def_cfa_offset 24
  3639              		.cfi_offset 3, -24
  3640              		.cfi_offset 4, -20
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 144
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 144
 
 
  3641              		.cfi_offset 5, -16
@@ -8638,7 +8638,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  3678              		.loc 1 1438 21 is_stmt 0 view .LVU1344
  3679 0026 C36C     		ldr	r3, [r0, #76]
 1438:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****     {
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 145
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 145
 
 
  3680              		.loc 1 1438 7 view .LVU1345
@@ -8698,7 +8698,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  3717              		.loc 1 1431 22 view .LVU1362
  3718 0050 43F00073 		orr	r3, r3, #33554432
  3719 0054 8363     		str	r3, [r0, #56]
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 146
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 146
 
 
 1432:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****     }
@@ -8758,7 +8758,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
 1467:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****       if(errorstate != HAL_SD_ERROR_NONE)
  3757              		.loc 1 1467 20 is_stmt 0 view .LVU1380
  3758 0074 3146     		mov	r1, r6
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 147
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 147
 
 
  3759 0076 2068     		ldr	r0, [r4]
@@ -8818,7 +8818,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  3797 00a2 84F83430 		strb	r3, [r4, #52]
 1453:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****     }
  3798              		.loc 1 1453 7 is_stmt 1 view .LVU1397
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 148
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 148
 
 
 1453:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****     }
@@ -8878,7 +8878,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  3837 00c8 84F83430 		strb	r3, [r4, #52]
 1497:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****     }
  3838              		.loc 1 1497 7 is_stmt 1 view .LVU1414
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 149
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 149
 
 
 1497:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****     }
@@ -8938,7 +8938,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  3878 00f2 00BF     		.align	2
  3879              	.L236:
  3880 00f4 FF054000 		.word	4195839
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 150
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 150
 
 
  3881              		.cfi_endproc
@@ -8998,7 +8998,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  3932              		.section	.text.HAL_SD_TxCpltCallback,"ax",%progbits
  3933              		.align	1
  3934              		.weak	HAL_SD_TxCpltCallback
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 151
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 151
 
 
  3935              		.syntax unified
@@ -9058,7 +9058,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  3987              		@ frame_needed = 0, uses_anonymous_args = 0
  3988              		@ link register save eliminated.
 1785:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** 
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 152
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 152
 
 
  3989              		.loc 1 1785 3 view .LVU1445
@@ -9118,7 +9118,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  4032              		.loc 1 2531 24 view .LVU1458
  4033 000e 23F00803 		bic	r3, r3, #8
  4034 0012 D362     		str	r3, [r2, #44]
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 153
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 153
 
 
 2534:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** 
@@ -9178,7 +9178,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  4073              		.loc 1 2524 7 is_stmt 1 view .LVU1474
  4074 0040 2046     		mov	r0, r4
  4075              	.LVL331:
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 154
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 154
 
 
 2524:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** #endif
@@ -9238,7 +9238,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
 2012:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** 
  4125              		.loc 1 2012 43 is_stmt 0 view .LVU1484
  4126 0006 436F     		ldr	r3, [r0, #116]
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 155
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 155
 
 
 2012:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** 
@@ -9298,7 +9298,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  4161              		.loc 1 2022 3 is_stmt 1 view .LVU1504
 2022:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** 
  4162              		.loc 1 2022 40 is_stmt 0 view .LVU1505
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 156
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 156
 
 
  4163 0032 D0F88030 		ldr	r3, [r0, #128]
@@ -9358,7 +9358,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  4204              	.LFB154:
 2042:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   pCSD->CSDStruct = (uint8_t)((hsd->CSD[0] & 0xC0000000U) >> 30U);
  4205              		.loc 1 2042 1 is_stmt 1 view -0
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 157
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 157
 
 
  4206              		.cfi_startproc
@@ -9418,7 +9418,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  4241              		.loc 1 2051 14 view .LVU1540
  4242 0024 0A71     		strb	r2, [r1, #4]
 2053:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** 
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 158
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 158
 
 
  4243              		.loc 1 2053 3 is_stmt 1 view .LVU1541
@@ -9478,7 +9478,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  4277              		.loc 1 2063 46 is_stmt 0 view .LVU1561
  4278 004c 826E     		ldr	r2, [r0, #104]
 2063:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** 
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 159
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 159
 
 
  4279              		.loc 1 2063 27 view .LVU1562
@@ -9538,7 +9538,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  4315 007a DA6E     		ldr	r2, [r3, #108]
 2073:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** 
  4316              		.loc 1 2073 32 view .LVU1581
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 160
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 160
 
 
  4317 007c C2F3C262 		ubfx	r2, r2, #27, #3
@@ -9598,7 +9598,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  4351              		.loc 1 2083 47 view .LVU1601
  4352 00a6 0132     		adds	r2, r2, #1
 2083:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****     hsd->SdCard.BlockNbr *= (1UL << ((pCSD->DeviceSizeMul & 0x07U) + 2U));
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 161
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 161
 
 
  4353              		.loc 1 2083 27 view .LVU1602
@@ -9658,7 +9658,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  4389 00d4 DA6E     		ldr	r2, [r3, #108]
 2109:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** 
  4390              		.loc 1 2109 23 view .LVU1621
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 162
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 162
 
 
  4391 00d6 C2F38032 		ubfx	r2, r2, #14, #1
@@ -9718,7 +9718,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  4425              		.loc 1 2119 23 view .LVU1641
  4426 00fc C2F38262 		ubfx	r2, r2, #26, #3
 2119:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** 
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 163
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 163
 
 
  4427              		.loc 1 2119 21 view .LVU1642
@@ -9778,7 +9778,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
 2131:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** 
  4462              		.loc 1 2131 39 is_stmt 0 view .LVU1662
  4463 0130 1A6F     		ldr	r2, [r3, #112]
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 164
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 164
 
 
 2131:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** 
@@ -9838,7 +9838,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  4498 0162 1B6F     		ldr	r3, [r3, #112]
  4499              	.LVL338:
 2141:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** 
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 165
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 165
 
 
  4500              		.loc 1 2141 19 view .LVU1683
@@ -9898,7 +9898,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
 2095:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****     hsd->SdCard.LogBlockNbr = hsd->SdCard.BlockNbr;
  4537              		.loc 1 2095 26 view .LVU1701
  4538 018e 5A65     		str	r2, [r3, #84]
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 166
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 166
 
 
 2096:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****     hsd->SdCard.BlockSize = 512U;
@@ -9958,7 +9958,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  4577              		.cfi_endproc
  4578              	.LFE154:
  4580              		.section	.text.SD_InitCard,"ax",%progbits
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 167
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 167
 
 
  4581              		.align	1
@@ -10018,7 +10018,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
 2686:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   {
  4624              		.loc 1 2686 5 view .LVU1730
  4625 0018 032B     		cmp	r3, #3
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 168
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 168
 
 
  4626 001a 45D1     		bne	.L264
@@ -10078,7 +10078,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  4664              		.loc 1 2728 20 discriminator 1 view .LVU1746
  4665 0044 6066     		str	r0, [r4, #100]
 2729:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****       hsd->CSD[2U] = SDIO_GetResponse(hsd->Instance, SDIO_RESP3);
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 169
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 169
 
 
  4666              		.loc 1 2729 7 is_stmt 1 view .LVU1747
@@ -10138,7 +10138,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  4706 0074 FFF7FEFF 		bl	HAL_SD_GetCardCSD
  4707              	.LVL355:
 2739:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   {
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 170
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 170
 
 
  4708              		.loc 1 2739 6 discriminator 1 view .LVU1762
@@ -10198,7 +10198,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
 2690:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****     {
  4749              		.loc 1 2690 5 is_stmt 1 view .LVU1776
 2690:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****     {
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 171
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 171
 
 
  4750              		.loc 1 2690 7 is_stmt 0 view .LVU1777
@@ -10258,7 +10258,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  4790              		.loc 1 2708 5 is_stmt 1 view .LVU1791
 2708:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****     if(errorstate != HAL_SD_ERROR_NONE)
  4791              		.loc 1 2708 18 is_stmt 0 view .LVU1792
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 172
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 172
 
 
  4792 00de 0DF11201 		add	r1, sp, #18
@@ -10318,7 +10318,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  4841 0000 70B5     		push	{r4, r5, r6, lr}
  4842              	.LCFI55:
  4843              		.cfi_def_cfa_offset 16
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 173
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 173
 
 
  4844              		.cfi_offset 4, -16
@@ -10378,7 +10378,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  4882 0024 2068     		ldr	r0, [r4]
  4883 0026 FFF7FEFF 		bl	SDIO_Init
  4884              	.LVL374:
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 174
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 174
 
 
  420:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** 
@@ -10438,7 +10438,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  4923              	.L268:
  461:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** 
  4924              		.loc 1 461 1 is_stmt 0 view .LVU1832
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 175
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 175
 
 
  4925 0058 0AB0     		add	sp, sp, #40
@@ -10498,7 +10498,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  4964              		.loc 1 450 16 is_stmt 0 view .LVU1847
  4965 0074 4FF40071 		mov	r1, #512
  4966 0078 2068     		ldr	r0, [r4]
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 176
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 176
 
 
  4967              	.LVL385:
@@ -10558,7 +10558,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  5008              		.section	.text.HAL_SD_Init,"ax",%progbits
  5009              		.align	1
  5010              		.global	HAL_SD_Init
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 177
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 177
 
 
  5011              		.syntax unified
@@ -10618,7 +10618,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  379:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   {
  5050              		.loc 1 379 3 is_stmt 1 view .LVU1878
  379:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   {
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 178
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 178
 
 
  5051              		.loc 1 379 7 is_stmt 0 view .LVU1879
@@ -10678,7 +10678,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  5090              		.loc 1 394 1 view .LVU1894
  5091 0030 7047     		bx	lr
  5092              	.LVL397:
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 179
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 179
 
 
  5093              	.L279:
@@ -10738,7 +10738,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  5140              	.LVL401:
 2162:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   {
  5141              		.loc 1 2162 3 is_stmt 1 view .LVU1904
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 180
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 180
 
 
 2162:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   {
@@ -10798,7 +10798,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  5179              		.loc 1 2200 20 is_stmt 0 view .LVU1921
  5180 0034 A863     		str	r0, [r5, #56]
 2201:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****     status = HAL_ERROR;
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 181
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 181
 
 
  5181              		.loc 1 2201 5 is_stmt 1 view .LVU1922
@@ -10858,7 +10858,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
 2176:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** 
  5220              		.loc 1 2176 25 view .LVU1938
  5221 0052 23F0FF03 		bic	r3, r3, #255
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 182
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 182
 
 
  5222 0056 43EA1263 		orr	r3, r3, r2, lsr #24
@@ -10918,7 +10918,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
 2185:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** 
  5258              		.loc 1 2185 33 view .LVU1957
  5259 0088 A272     		strb	r2, [r4, #10]
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 183
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 183
 
 
 2187:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** 
@@ -10978,7 +10978,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  5302              	.LVL411:
  5303              	.LFB156:
 2216:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   pCardInfo->CardType     = (uint32_t)(hsd->SdCard.CardType);
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 184
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 184
 
 
  5304              		.loc 1 2216 1 is_stmt 1 view -0
@@ -11038,7 +11038,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  5339              		.loc 1 2223 3 is_stmt 1 view .LVU1991
 2223:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   pCardInfo->LogBlockSize = (uint32_t)(hsd->SdCard.LogBlockSize);
  5340              		.loc 1 2223 51 is_stmt 0 view .LVU1992
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 185
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 185
 
 
  5341 0018 C36D     		ldr	r3, [r0, #92]
@@ -11098,7 +11098,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
 2244:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** 
  5386              		.loc 1 2244 3 view .LVU2004
  5387              	.LVL414:
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 186
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 186
 
 
 2247:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** 
@@ -11158,7 +11158,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  5424 0034 0FE0     		b	.L296
  5425              	.L304:
 2260:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** 
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 187
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 187
 
 
  5426              		.loc 1 2260 7 is_stmt 1 view .LVU2023
@@ -11218,7 +11218,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
 2285:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****     hsd->State = HAL_SD_STATE_READY;
  5465              		.loc 1 2285 5 is_stmt 1 view .LVU2039
  5466 005a 2368     		ldr	r3, [r4]
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 188
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 188
 
 
  5467 005c 174A     		ldr	r2, .L306
@@ -11278,7 +11278,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  5505 0080 0123     		movs	r3, #1
  5506 0082 84F83430 		strb	r3, [r4, #52]
 2314:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** }
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 189
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 189
 
 
  5507              		.loc 1 2314 3 is_stmt 1 view .LVU2056
@@ -11338,7 +11338,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
 2297:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****     (void)SDIO_Init(hsd->Instance, Init);
  5545              		.loc 1 2297 5 is_stmt 1 view .LVU2073
 2297:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****     (void)SDIO_Init(hsd->Instance, Init);
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 190
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 190
 
 
  5546              		.loc 1 2297 41 is_stmt 0 view .LVU2074
@@ -11398,7 +11398,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  5595 0004 0446     		mov	r4, r0
 2324:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   uint32_t errorstate;
  5596              		.loc 1 2324 3 is_stmt 1 view .LVU2082
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 191
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 191
 
 
 2325:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   uint32_t resp1 = 0;
@@ -11458,7 +11458,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  5636              		.section	.text.SD_DMAError,"ax",%progbits
  5637              		.align	1
  5638              		.syntax unified
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 192
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 192
 
 
  5639              		.thumb
@@ -11518,7 +11518,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  5679              	.LVL438:
 2562:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****     {
  5680              		.loc 1 2562 5 is_stmt 1 view .LVU2114
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 193
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 193
 
 
 2562:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****     {
@@ -11578,7 +11578,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
 2573:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****       {
  5722              		.loc 1 2573 7 is_stmt 1 view .LVU2128
 2573:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****       {
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 194
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 194
 
 
  5723              		.loc 1 2573 47 is_stmt 0 view .LVU2129
@@ -11638,7 +11638,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  5769              	.LVL450:
  5770              	.LFB164:
 2596:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   SD_HandleTypeDef* hsd = (SD_HandleTypeDef* )(hdma->Parent);
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 195
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 195
 
 
  5771              		.loc 1 2596 1 is_stmt 1 view -0
@@ -11698,7 +11698,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  5810 001e 0128     		cmp	r0, #1
  5811 0020 05D9     		bls	.L325
  5812              	.LVL455:
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 196
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 196
 
 
  5813              	.L321:
@@ -11758,7 +11758,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  5857              	SD_DMARxAbort:
  5858              	.LVL461:
  5859              	.LFB165:
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 197
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 197
 
 
 2635:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   SD_HandleTypeDef* hsd = (SD_HandleTypeDef* )(hdma->Parent);
@@ -11818,7 +11818,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  5898              		.loc 1 2645 5 view .LVU2183
  5899 001e 0128     		cmp	r0, #1
  5900 0020 05D9     		bls	.L331
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 198
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 198
 
 
  5901              	.LVL466:
@@ -11878,7 +11878,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  5944              		.thumb
  5945              		.thumb_func
  5947              	HAL_SD_IRQHandler:
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 199
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 199
 
 
  5948              	.LVL472:
@@ -11938,7 +11938,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  5988              		.loc 1 1531 5 view .LVU2209
  5989 0024 2268     		ldr	r2, [r4]
  5990 0026 D36B     		ldr	r3, [r2, #60]
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 200
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 200
 
 
  5991 0028 23F44343 		bic	r3, r3, #49920
@@ -11998,7 +11998,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  6029 0060 2046     		mov	r0, r4
  6030 0062 FFF7FEFF 		bl	HAL_SD_RxCpltCallback
  6031              	.LVL475:
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 201
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 201
 
 
  6032 0066 01E0     		b	.L332
@@ -12058,7 +12058,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  6073              	.LVL484:
  6074 008e EDE7     		b	.L332
  6075              	.LVL485:
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 202
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 202
 
 
  6076              	.L336:
@@ -12118,7 +12118,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  6114              		.loc 1 1584 22 view .LVU2254
  6115 00bc FFF7FEFF 		bl	SDMMC_CmdStopTransfer
  6116              	.LVL490:
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 203
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 203
 
 
 1585:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****         {
@@ -12178,7 +12178,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  6155              		.loc 1 1628 8 is_stmt 0 view .LVU2270
  6156 00ec 5A6B     		ldr	r2, [r3, #52]
 1628:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****     {
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 204
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 204
 
 
  6157              		.loc 1 1628 7 view .LVU2271
@@ -12238,7 +12238,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  6194              		.loc 1 1640 8 is_stmt 0 view .LVU2288
  6195 011c 5A6B     		ldr	r2, [r3, #52]
 1640:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****     {
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 205
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 205
 
 
  6196              		.loc 1 1640 7 view .LVU2289
@@ -12298,7 +12298,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  6235              		.loc 1 1667 8 discriminator 1 view .LVU2304
  6236 0156 A36B     		ldr	r3, [r4, #56]
 1667:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** 
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 206
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 206
 
 
  6237              		.loc 1 1667 20 discriminator 1 view .LVU2305
@@ -12358,7 +12358,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  6276              	.L353:
 1618:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   }
  6277              		.loc 1 1618 5 view .LVU2321
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 207
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 207
 
 
  6278 018e 2046     		mov	r0, r4
@@ -12418,7 +12418,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
 1705:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****         hsd->State = HAL_SD_STATE_READY;
  6319              		.loc 1 1705 9 view .LVU2335
 1705:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****         hsd->State = HAL_SD_STATE_READY;
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 208
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 208
 
 
  6320              		.loc 1 1705 24 is_stmt 0 view .LVU2336
@@ -12478,7 +12478,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  6366              		.loc 1 2347 3 is_stmt 1 view .LVU2346
 2348:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** 
  6367              		.loc 1 2348 3 view .LVU2347
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 209
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 209
 
 
 2348:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** 
@@ -12538,7 +12538,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  6407              		.loc 1 2383 5 is_stmt 1 view .LVU2362
 2386:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** 
  6408              		.loc 1 2386 3 view .LVU2363
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 210
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 210
 
 
 2386:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** 
@@ -12598,7 +12598,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  6447 005e FFF7FEFF 		bl	HAL_DMA_Abort
  6448              	.LVL513:
 2367:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****       {
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 211
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 211
 
 
  6449              		.loc 1 2367 9 discriminator 1 view .LVU2380
@@ -12658,7 +12658,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  6489 008c E2E7     		b	.L361
  6490              	.L363:
 2398:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****   }
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 212
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 212
 
 
  6491              		.loc 1 2398 12 view .LVU2395
@@ -12718,7 +12718,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  6537              		.loc 1 2423 5 is_stmt 1 view .LVU2405
 2423:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c **** 
  6538              		.loc 1 2423 8 is_stmt 0 view .LVU2406
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 213
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 213
 
 
  6539 0020 0168     		ldr	r1, [r0]
@@ -12778,7 +12778,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  6577 0046 0028     		cmp	r0, #0
  6578 0048 F6D0     		beq	.L371
 2431:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****       }
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 214
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 214
 
 
  6579              		.loc 1 2431 9 is_stmt 1 view .LVU2423
@@ -12838,7 +12838,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  6618              		.loc 1 2454 17 is_stmt 0 view .LVU2438
  6619 006e FFF7FEFF 		bl	HAL_SD_GetCardState
  6620              	.LVL533:
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 215
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 215
 
 
 2455:Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c ****     hsd->Context = SD_CONTEXT_NONE;
@@ -12898,7 +12898,7 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  6659              		.loc 1 2470 7 is_stmt 1 view .LVU2454
  6660 0094 2046     		mov	r0, r4
  6661 0096 FFF7FEFF 		bl	HAL_SD_AbortCallback
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 216
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 216
 
 
  6662              	.LVL539:
@@ -12924,113 +12924,113 @@ ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 1
  6682              		.file 8 "Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_ll_sdmmc.h"
  6683              		.file 9 "Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_sd.h"
  6684              		.file 10 "Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal.h"
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 217
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 217
 
 
 DEFINED SYMBOLS
                             *ABS*:00000000 stm32f4xx_hal_sd.c
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:21     .text.SD_DMATransmitCplt:00000000 $t
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:26     .text.SD_DMATransmitCplt:00000000 SD_DMATransmitCplt
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:52     .text.SD_PowerON:00000000 $t
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:57     .text.SD_PowerON:00000000 SD_PowerON
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:276    .text.SD_PowerON:000000bc $d
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:281    .text.SD_PowerOFF:00000000 $t
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:286    .text.SD_PowerOFF:00000000 SD_PowerOFF
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:312    .text.SD_Read_IT:00000000 $t
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:317    .text.SD_Read_IT:00000000 SD_Read_IT
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:420    .text.SD_Write_IT:00000000 $t
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:425    .text.SD_Write_IT:00000000 SD_Write_IT
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:542    .text.SD_SendSDStatus:00000000 $t
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:547    .text.SD_SendSDStatus:00000000 SD_SendSDStatus
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:823    .text.SD_FindSCR:00000000 $t
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:828    .text.SD_FindSCR:00000000 SD_FindSCR
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:1097   .text.SD_WideBus_Enable:00000000 $t
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:1102   .text.SD_WideBus_Enable:00000000 SD_WideBus_Enable
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:1197   .text.SD_WideBus_Disable:00000000 $t
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:1202   .text.SD_WideBus_Disable:00000000 SD_WideBus_Disable
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:1297   .text.SD_SendStatus:00000000 $t
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:1302   .text.SD_SendStatus:00000000 SD_SendStatus
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:1367   .text.HAL_SD_MspInit:00000000 $t
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:1373   .text.HAL_SD_MspInit:00000000 HAL_SD_MspInit
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:1388   .text.HAL_SD_MspDeInit:00000000 $t
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:1394   .text.HAL_SD_MspDeInit:00000000 HAL_SD_MspDeInit
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:1409   .text.HAL_SD_DeInit:00000000 $t
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:1415   .text.HAL_SD_DeInit:00000000 HAL_SD_DeInit
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:1469   .text.HAL_SD_ReadBlocks:00000000 $t
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:1475   .text.HAL_SD_ReadBlocks:00000000 HAL_SD_ReadBlocks
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:2040   .text.HAL_SD_ReadBlocks:0000024c $d
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:2045   .text.HAL_SD_WriteBlocks:00000000 $t
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:2051   .text.HAL_SD_WriteBlocks:00000000 HAL_SD_WriteBlocks
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:2543   .text.HAL_SD_WriteBlocks:00000210 $d
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:2548   .text.HAL_SD_ReadBlocks_IT:00000000 $t
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:2554   .text.HAL_SD_ReadBlocks_IT:00000000 HAL_SD_ReadBlocks_IT
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:2776   .text.HAL_SD_ReadBlocks_IT:000000c8 $d
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:2781   .text.HAL_SD_WriteBlocks_IT:00000000 $t
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:2787   .text.HAL_SD_WriteBlocks_IT:00000000 HAL_SD_WriteBlocks_IT
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:3010   .text.HAL_SD_WriteBlocks_IT:000000c0 $d
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:3015   .text.HAL_SD_ReadBlocks_DMA:00000000 $t
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:3021   .text.HAL_SD_ReadBlocks_DMA:00000000 HAL_SD_ReadBlocks_DMA
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:3307   .text.HAL_SD_ReadBlocks_DMA:00000128 $d
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:4001   .text.SD_DMAReceiveCplt:00000000 SD_DMAReceiveCplt
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:5642   .text.SD_DMAError:00000000 SD_DMAError
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:3315   .text.HAL_SD_WriteBlocks_DMA:00000000 $t
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:3321   .text.HAL_SD_WriteBlocks_DMA:00000000 HAL_SD_WriteBlocks_DMA
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:3614   .text.HAL_SD_WriteBlocks_DMA:0000012c $d
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:3622   .text.HAL_SD_Erase:00000000 $t
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:3628   .text.HAL_SD_Erase:00000000 HAL_SD_Erase
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:3880   .text.HAL_SD_Erase:000000f4 $d
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:3885   .text.HAL_SD_GetState:00000000 $t
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:3891   .text.HAL_SD_GetState:00000000 HAL_SD_GetState
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:3909   .text.HAL_SD_GetError:00000000 $t
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:3915   .text.HAL_SD_GetError:00000000 HAL_SD_GetError
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:3933   .text.HAL_SD_TxCpltCallback:00000000 $t
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 218
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:21     .text.SD_DMATransmitCplt:00000000 $t
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:26     .text.SD_DMATransmitCplt:00000000 SD_DMATransmitCplt
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:52     .text.SD_PowerON:00000000 $t
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:57     .text.SD_PowerON:00000000 SD_PowerON
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:276    .text.SD_PowerON:000000bc $d
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:281    .text.SD_PowerOFF:00000000 $t
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:286    .text.SD_PowerOFF:00000000 SD_PowerOFF
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:312    .text.SD_Read_IT:00000000 $t
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:317    .text.SD_Read_IT:00000000 SD_Read_IT
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:420    .text.SD_Write_IT:00000000 $t
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:425    .text.SD_Write_IT:00000000 SD_Write_IT
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:542    .text.SD_SendSDStatus:00000000 $t
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:547    .text.SD_SendSDStatus:00000000 SD_SendSDStatus
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:823    .text.SD_FindSCR:00000000 $t
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:828    .text.SD_FindSCR:00000000 SD_FindSCR
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:1097   .text.SD_WideBus_Enable:00000000 $t
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:1102   .text.SD_WideBus_Enable:00000000 SD_WideBus_Enable
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:1197   .text.SD_WideBus_Disable:00000000 $t
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:1202   .text.SD_WideBus_Disable:00000000 SD_WideBus_Disable
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:1297   .text.SD_SendStatus:00000000 $t
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:1302   .text.SD_SendStatus:00000000 SD_SendStatus
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:1367   .text.HAL_SD_MspInit:00000000 $t
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:1373   .text.HAL_SD_MspInit:00000000 HAL_SD_MspInit
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:1388   .text.HAL_SD_MspDeInit:00000000 $t
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:1394   .text.HAL_SD_MspDeInit:00000000 HAL_SD_MspDeInit
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:1409   .text.HAL_SD_DeInit:00000000 $t
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:1415   .text.HAL_SD_DeInit:00000000 HAL_SD_DeInit
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:1469   .text.HAL_SD_ReadBlocks:00000000 $t
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:1475   .text.HAL_SD_ReadBlocks:00000000 HAL_SD_ReadBlocks
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:2040   .text.HAL_SD_ReadBlocks:0000024c $d
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:2045   .text.HAL_SD_WriteBlocks:00000000 $t
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:2051   .text.HAL_SD_WriteBlocks:00000000 HAL_SD_WriteBlocks
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:2543   .text.HAL_SD_WriteBlocks:00000210 $d
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:2548   .text.HAL_SD_ReadBlocks_IT:00000000 $t
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:2554   .text.HAL_SD_ReadBlocks_IT:00000000 HAL_SD_ReadBlocks_IT
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:2776   .text.HAL_SD_ReadBlocks_IT:000000c8 $d
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:2781   .text.HAL_SD_WriteBlocks_IT:00000000 $t
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:2787   .text.HAL_SD_WriteBlocks_IT:00000000 HAL_SD_WriteBlocks_IT
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:3010   .text.HAL_SD_WriteBlocks_IT:000000c0 $d
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:3015   .text.HAL_SD_ReadBlocks_DMA:00000000 $t
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:3021   .text.HAL_SD_ReadBlocks_DMA:00000000 HAL_SD_ReadBlocks_DMA
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:3307   .text.HAL_SD_ReadBlocks_DMA:00000128 $d
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:4001   .text.SD_DMAReceiveCplt:00000000 SD_DMAReceiveCplt
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:5642   .text.SD_DMAError:00000000 SD_DMAError
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:3315   .text.HAL_SD_WriteBlocks_DMA:00000000 $t
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:3321   .text.HAL_SD_WriteBlocks_DMA:00000000 HAL_SD_WriteBlocks_DMA
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:3614   .text.HAL_SD_WriteBlocks_DMA:0000012c $d
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:3622   .text.HAL_SD_Erase:00000000 $t
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:3628   .text.HAL_SD_Erase:00000000 HAL_SD_Erase
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:3880   .text.HAL_SD_Erase:000000f4 $d
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:3885   .text.HAL_SD_GetState:00000000 $t
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:3891   .text.HAL_SD_GetState:00000000 HAL_SD_GetState
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:3909   .text.HAL_SD_GetError:00000000 $t
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:3915   .text.HAL_SD_GetError:00000000 HAL_SD_GetError
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:3933   .text.HAL_SD_TxCpltCallback:00000000 $t
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 218
 
 
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:3939   .text.HAL_SD_TxCpltCallback:00000000 HAL_SD_TxCpltCallback
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:3954   .text.HAL_SD_RxCpltCallback:00000000 $t
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:3960   .text.HAL_SD_RxCpltCallback:00000000 HAL_SD_RxCpltCallback
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:3975   .text.HAL_SD_ErrorCallback:00000000 $t
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:3981   .text.HAL_SD_ErrorCallback:00000000 HAL_SD_ErrorCallback
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:3996   .text.SD_DMAReceiveCplt:00000000 $t
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:4084   .text.HAL_SD_AbortCallback:00000000 $t
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:4090   .text.HAL_SD_AbortCallback:00000000 HAL_SD_AbortCallback
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:4105   .text.HAL_SD_GetCardCID:00000000 $t
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:4111   .text.HAL_SD_GetCardCID:00000000 HAL_SD_GetCardCID
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:4196   .text.HAL_SD_GetCardCSD:00000000 $t
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:4202   .text.HAL_SD_GetCardCSD:00000000 HAL_SD_GetCardCSD
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:4576   .text.HAL_SD_GetCardCSD:000001b4 $d
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:4581   .text.SD_InitCard:00000000 $t
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:4586   .text.SD_InitCard:00000000 SD_InitCard
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:4827   .text.HAL_SD_InitCard:00000000 $t
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:4833   .text.HAL_SD_InitCard:00000000 HAL_SD_InitCard
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:5003   .text.HAL_SD_InitCard:00000098 $d
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:5009   .text.HAL_SD_Init:00000000 $t
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:5015   .text.HAL_SD_Init:00000000 HAL_SD_Init
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:5105   .text.HAL_SD_GetCardStatus:00000000 $t
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:5111   .text.HAL_SD_GetCardStatus:00000000 HAL_SD_GetCardStatus
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:5290   .text.HAL_SD_GetCardStatus:000000a8 $d
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:5295   .text.HAL_SD_GetCardInfo:00000000 $t
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:5301   .text.HAL_SD_GetCardInfo:00000000 HAL_SD_GetCardInfo
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:5359   .text.HAL_SD_ConfigWideBusOperation:00000000 $t
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:5365   .text.HAL_SD_ConfigWideBusOperation:00000000 HAL_SD_ConfigWideBusOperation
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:5568   .text.HAL_SD_ConfigWideBusOperation:000000bc $d
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:5573   .text.HAL_SD_GetCardState:00000000 $t
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:5579   .text.HAL_SD_GetCardState:00000000 HAL_SD_GetCardState
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:5637   .text.SD_DMAError:00000000 $t
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:5758   .text.SD_DMAError:00000064 $d
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:5763   .text.SD_DMATxAbort:00000000 $t
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:5768   .text.SD_DMATxAbort:00000000 SD_DMATxAbort
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:5852   .text.SD_DMARxAbort:00000000 $t
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:5857   .text.SD_DMARxAbort:00000000 SD_DMARxAbort
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:5941   .text.HAL_SD_IRQHandler:00000000 $t
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:5947   .text.HAL_SD_IRQHandler:00000000 HAL_SD_IRQHandler
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:6340   .text.HAL_SD_IRQHandler:000001d8 $d
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:6346   .text.HAL_SD_Abort:00000000 $t
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:6352   .text.HAL_SD_Abort:00000000 HAL_SD_Abort
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:6498   .text.HAL_SD_Abort_IT:00000000 $t
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:6504   .text.HAL_SD_Abort_IT:00000000 HAL_SD_Abort_IT
-C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s:6669   .text.HAL_SD_Abort_IT:000000a0 $d
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:3939   .text.HAL_SD_TxCpltCallback:00000000 HAL_SD_TxCpltCallback
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:3954   .text.HAL_SD_RxCpltCallback:00000000 $t
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:3960   .text.HAL_SD_RxCpltCallback:00000000 HAL_SD_RxCpltCallback
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:3975   .text.HAL_SD_ErrorCallback:00000000 $t
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:3981   .text.HAL_SD_ErrorCallback:00000000 HAL_SD_ErrorCallback
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:3996   .text.SD_DMAReceiveCplt:00000000 $t
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:4084   .text.HAL_SD_AbortCallback:00000000 $t
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:4090   .text.HAL_SD_AbortCallback:00000000 HAL_SD_AbortCallback
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:4105   .text.HAL_SD_GetCardCID:00000000 $t
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:4111   .text.HAL_SD_GetCardCID:00000000 HAL_SD_GetCardCID
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:4196   .text.HAL_SD_GetCardCSD:00000000 $t
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:4202   .text.HAL_SD_GetCardCSD:00000000 HAL_SD_GetCardCSD
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:4576   .text.HAL_SD_GetCardCSD:000001b4 $d
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:4581   .text.SD_InitCard:00000000 $t
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:4586   .text.SD_InitCard:00000000 SD_InitCard
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:4827   .text.HAL_SD_InitCard:00000000 $t
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:4833   .text.HAL_SD_InitCard:00000000 HAL_SD_InitCard
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:5003   .text.HAL_SD_InitCard:00000098 $d
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:5009   .text.HAL_SD_Init:00000000 $t
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:5015   .text.HAL_SD_Init:00000000 HAL_SD_Init
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:5105   .text.HAL_SD_GetCardStatus:00000000 $t
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:5111   .text.HAL_SD_GetCardStatus:00000000 HAL_SD_GetCardStatus
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:5290   .text.HAL_SD_GetCardStatus:000000a8 $d
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:5295   .text.HAL_SD_GetCardInfo:00000000 $t
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:5301   .text.HAL_SD_GetCardInfo:00000000 HAL_SD_GetCardInfo
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:5359   .text.HAL_SD_ConfigWideBusOperation:00000000 $t
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:5365   .text.HAL_SD_ConfigWideBusOperation:00000000 HAL_SD_ConfigWideBusOperation
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:5568   .text.HAL_SD_ConfigWideBusOperation:000000bc $d
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:5573   .text.HAL_SD_GetCardState:00000000 $t
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:5579   .text.HAL_SD_GetCardState:00000000 HAL_SD_GetCardState
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:5637   .text.SD_DMAError:00000000 $t
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:5758   .text.SD_DMAError:00000064 $d
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:5763   .text.SD_DMATxAbort:00000000 $t
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:5768   .text.SD_DMATxAbort:00000000 SD_DMATxAbort
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:5852   .text.SD_DMARxAbort:00000000 $t
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:5857   .text.SD_DMARxAbort:00000000 SD_DMARxAbort
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:5941   .text.HAL_SD_IRQHandler:00000000 $t
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:5947   .text.HAL_SD_IRQHandler:00000000 HAL_SD_IRQHandler
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:6340   .text.HAL_SD_IRQHandler:000001d8 $d
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:6346   .text.HAL_SD_Abort:00000000 $t
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:6352   .text.HAL_SD_Abort:00000000 HAL_SD_Abort
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:6498   .text.HAL_SD_Abort_IT:00000000 $t
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:6504   .text.HAL_SD_Abort_IT:00000000 HAL_SD_Abort_IT
+C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s:6669   .text.HAL_SD_Abort_IT:000000a0 $d
 
 UNDEFINED SYMBOLS
 SDMMC_CmdGoIdleState
@@ -13044,7 +13044,7 @@ SDIO_WriteFIFO
 HAL_GetTick
 SDMMC_CmdBlockLength
 SDIO_ConfigData
-ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccNaUth8.s 			page 219
+ARM GAS  C:\Users\cesco\AppData\Local\Temp\ccKOD9cv.s 			page 219
 
 
 SDMMC_CmdStatusRegister
