@@ -1,16 +1,26 @@
 {
     "configurations": [
         {
-            "name": "STM32F407",
+            "name": "Daisy Seed",
             "includePath": [
-                "${workspaceFolder}/Core/Inc",
-                "${workspaceFolder}/Drivers/STM32F4xx_HAL_Driver/Inc",
-                "${workspaceFolder}/Drivers/CMSIS/Device/ST/STM32F4xx/Include",
-                "${workspaceFolder}/Drivers/CMSIS/Include"
+                "${workspaceFolder}/DaisySeed",
+                "C:/Users/cesco/daisy/libDaisy/src",
+                "C:/Users/cesco/daisy/libDaisy/src/**",
+                "C:/Users/cesco/daisy/DaisySP/Source",
+                "C:/Users/cesco/daisy/DaisySP/Source/**",
+                "C:/Users/cesco/daisy/libDaisy/Drivers/CMSIS_5/CMSIS/Core/Include",
+                "C:/Users/cesco/daisy/libDaisy/Drivers/STM32H7xx_HAL_Driver/Inc",
+                "C:/Users/cesco/daisy/libDaisy/Drivers/CMSIS-Device/ST/STM32H7xx/Include",
+                "C:/Users/cesco/daisy/libDaisy/Middlewares/Third_Party/FatFs/src"
             ],
             "defines": [
                 "USE_HAL_DRIVER",
-                "STM32F407xx"
+                "STM32H750xx",
+                "STM32H750IB",
+                "CORE_CM7",
+                "__FPU_PRESENT=1",
+                "ARM_MATH_CM7",
+                "DATA_IN_D2_SRAM"
             ],
             "compilerPath": "C:/Users/cesco/AppData/Roaming/xPacks/@xpack-dev-tools/arm-none-eabi-gcc/14.2.1-1.1.1/.content/bin/arm-none-eabi-gcc.exe",
             "cStandard": "c11",
