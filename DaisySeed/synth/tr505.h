@@ -165,7 +165,7 @@ public:
         sr_ = sampleRate;
         dt_ = 1.0f / sr_;
         active_ = false;
-        noiseState_ = 0x505CLAP;
+        noiseState_ = 0x505C1A9;
     }
 
     void Trigger(float velocity = 1.0f) {
@@ -207,7 +207,7 @@ private:
     float sr_ = 48000.0f, dt_ = 1.0f / 48000.0f;
     bool  active_ = false;
     float time_ = 0.0f, vel_ = 1.0f;
-    uint32_t noiseState_ = 0x505CLAP;
+    uint32_t noiseState_ = 0x505C1A9;
 };
 
 /* ═══════════════════════════════════════════════════════════════
@@ -224,7 +224,7 @@ public:
         sr_ = sampleRate;
         dt_ = 1.0f / sr_;
         active_ = false;
-        noiseState_ = 0x505HHAT;
+        noiseState_ = 0x505AA01;
     }
 
     void Trigger(float velocity = 1.0f) {
@@ -262,7 +262,7 @@ private:
     float sr_ = 48000.0f, dt_ = 1.0f / 48000.0f;
     bool  active_ = false;
     float time_ = 0.0f, vel_ = 1.0f;
-    uint32_t noiseState_ = 0x505HHAT;
+    uint32_t noiseState_ = 0x505AA01;
     float hpZ1_ = 0.0f, hpOut_ = 0.0f;
 };
 
@@ -277,7 +277,7 @@ public:
         sr_ = sampleRate;
         dt_ = 1.0f / sr_;
         active_ = false;
-        noiseState_ = 0x505OHHT;
+        noiseState_ = 0x505BB02;
     }
 
     void Trigger(float velocity = 1.0f) {
@@ -316,7 +316,7 @@ private:
     float sr_ = 48000.0f, dt_ = 1.0f / 48000.0f;
     bool  active_ = false;
     float time_ = 0.0f, vel_ = 1.0f;
-    uint32_t noiseState_ = 0x505OHHT;
+    uint32_t noiseState_ = 0x505BB02;
     float hpZ1_ = 0.0f, hpOut_ = 0.0f;
 };
 
@@ -450,7 +450,7 @@ public:
         sr_ = sampleRate;
         dt_ = 1.0f / sr_;
         active_ = false;
-        noiseState_ = 0x505CYMB;
+        noiseState_ = 0x505CC03;
     }
 
     void Trigger(float velocity = 1.0f) {
@@ -488,7 +488,7 @@ private:
     float sr_ = 48000.0f, dt_ = 1.0f / 48000.0f;
     bool  active_ = false;
     float time_ = 0.0f, vel_ = 1.0f;
-    uint32_t noiseState_ = 0x505CYMB;
+    uint32_t noiseState_ = 0x505CC03;
     float hpZ1_ = 0.0f, hpOut_ = 0.0f;
 };
 
@@ -505,7 +505,7 @@ public:
         sr_ = sampleRate;
         dt_ = 1.0f / sr_;
         active_ = false;
-        noiseState_ = 0x505RIMS;
+        noiseState_ = 0x505DD04;
     }
 
     void Trigger(float velocity = 1.0f) {
@@ -543,7 +543,7 @@ private:
     float sr_ = 48000.0f, dt_ = 1.0f / 48000.0f;
     bool  active_ = false;
     float time_ = 0.0f, phase_ = 0.0f, vel_ = 1.0f;
-    uint32_t noiseState_ = 0x505RIMS;
+    uint32_t noiseState_ = 0x505DD04;
 };
 
 /* ═══════════════════════════════════════════════════════════════

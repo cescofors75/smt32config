@@ -271,7 +271,7 @@ protected:
     bool  active_ = false;
     float time_ = 0.0f, vel_ = 1.0f;
     float phase_[6] = {};
-    uint32_t noiseState_ = 0x909HHAT;
+    uint32_t noiseState_ = 0x909AA01;
     float hpZ1_ = 0.0f, hpOut_ = 0.0f;
 
     float MetallicNoise() {
@@ -461,7 +461,7 @@ public:
         sr_ = sampleRate;
         dt_ = 1.0f / sr_;
         active_ = false;
-        noiseState_ = 0x909RIDE;
+        noiseState_ = 0x909A1DE;
     }
 
     void Trigger(float velocity = 1.0f) {
@@ -507,7 +507,7 @@ public:
         sr_ = sampleRate;
         dt_ = 1.0f / sr_;
         active_ = false;
-        noiseState_ = 0x909CRSH;
+        noiseState_ = 0x909CA5E;
     }
 
     void Trigger(float velocity = 1.0f) {
@@ -554,7 +554,7 @@ public:
         sr_ = sampleRate;
         dt_ = 1.0f / sr_;
         active_ = false;
-        noiseState_ = 0x909RIMS;
+        noiseState_ = 0x909E1A5;
     }
 
     void Trigger(float velocity = 1.0f) {
@@ -591,7 +591,7 @@ private:
     float sr_ = 48000.0f, dt_ = 1.0f / 48000.0f;
     bool  active_ = false;
     float time_ = 0.0f, phase_ = 0.0f, vel_ = 1.0f;
-    uint32_t noiseState_ = 0x909RIMS;
+    uint32_t noiseState_ = 0x909E1A5;
 };
 
 /* ═══════════════════════════════════════════════════════════════

@@ -34,6 +34,7 @@
 #include "synth/tr909.h"
 #include "synth/tr505.h"
 #include "synth/tb303.h"
+#include "synth/demo_mode.h"
 
 using namespace daisy;
 using namespace daisysp;
@@ -451,11 +452,11 @@ struct BiquadEQ {
  * ═══════════════════════════════════════════════════════════════════ */
 static DelayLine<float, MAX_DELAY_SAMPLES> DSY_SDRAM_BSS masterDelay;
 DSY_SDRAM_BSS static ReverbSc   masterReverb;
-static Chorus     masterChorus;
+DSY_SDRAM_BSS static Chorus     masterChorus;
 static Tremolo    masterTremolo;
 static Compressor masterComp;
 static Fold       masterFold;
-static Phaser     masterPhaser;
+DSY_SDRAM_BSS static Phaser     masterPhaser;
 
 /* Delay */
 static bool  delayActive   = false;
@@ -912,7 +913,18 @@ static TR505::Kit synth505;
 static TB303::Synth acid303;
 
 /* Bitmask: qué engines están activos (bit0=808, bit1=909, bit2=505, bit3=303) */
-static uint8_t synthActiveMask = 0x0F;  /* todos activos por defecto */
+static uint8_t synthActiveMask = 0x0B;  /* 808+909+303 activos; 505 desactivado por estabilidad */
+
+/* ── Demo Mode ── */
+static Demo::DemoSequencer demoSeq;
+static bool demoModeActive = true;   /* arranca en demo, se desactiva al recibir SPI */
+static constexpr bool kEnableSpiSlave = true;  /* modo integrado: comunicación SPI1 con ESP32 master */
+static constexpr bool kEnableSynth505 = false; /* aislamiento de crash en callback */
+static constexpr bool kAudioSafeMode = false; /* callback de audio real */
+static constexpr bool kBootDiagMinimal = false; /* diagnóstico extremo: solo LED, sin audio ni FX */
+static constexpr bool kEnableAudioStart = true; /* iniciar audio normal */
+static constexpr bool kEnableStartLog = false; /* diagnóstico: aislar StartLog/USB */
+static constexpr bool kEnableInitFx = true;    /* diagnóstico: reactivar InitFX para aislar causa */
 
 /* PRNG for crackle/noise FX */
 static uint32_t noiseState = 0x12345678;
@@ -1032,6 +1044,9 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
                    size_t                    size)
 {
     for(size_t i = 0; i < size; i++) out[0][i] = out[1][i] = 0.0f;
+
+    if(kAudioSafeMode)
+        return;
 
     float mixPeak = 0.0f;
 
@@ -1226,16 +1241,25 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
             else                scEnv -= (scEnv - sideSrc) * scReleaseK;
         }
 
+        /* ── DEMO MODE: tick del secuenciador ── */
+        float demoFadeGain = 1.0f;
+        if (demoModeActive)
+            demoFadeGain = demoSeq.ProcessSample();
+
         /* ── SYNTH ENGINES (síntesis matemática) ── */
         float synthMix = 0.0f;
         if (synthActiveMask & (1 << SYNTH_ENGINE_808))
             synthMix += synth808.Process();
         if (synthActiveMask & (1 << SYNTH_ENGINE_909))
             synthMix += synth909.Process();
-        if (synthActiveMask & (1 << SYNTH_ENGINE_505))
+        if (kEnableSynth505 && (synthActiveMask & (1 << SYNTH_ENGINE_505)))
             synthMix += synth505.Process();
         if (synthActiveMask & (1 << SYNTH_ENGINE_303))
             synthMix += acid303.Process();
+
+        /* Aplicar fade del demo mode */
+        if (demoModeActive)
+            synthMix *= demoFadeGain;
 
         /* Añadir synths al bus (mono → ambos canales) */
         busL += synthMix;
@@ -1371,6 +1395,9 @@ static void BuildResponse(uint8_t cmd, uint16_t seq,
     pendingResponse = true;
     /* NUNCA transmitir desde ISR — se hace en main loop */
 }
+
+/* Forward declaration — definida more adelante en sección SD */
+static bool LoadWavToPad(const char* filepath, uint8_t padIdx);
 
 /* ═══════════════════════════════════════════════════════════════════
  *  23. PROCESS COMMAND  (ALL RED808 commands)
@@ -2288,7 +2315,7 @@ static void ProcessCommand()
         synth909.Init((float)SR);
         synth505.Init((float)SR);
         acid303.Init((float)SR);
-        synthActiveMask = 0x0F;
+        synthActiveMask = 0x0B;
         break;
 
     /* ════════════════════════════════════════════
@@ -2480,6 +2507,11 @@ static void SpiRxCallback(void* context, SpiHandle::Result result)
         }
     }
     waitingPayload = false;
+    /* Desactivar demo mode al recibir primer comando SPI real */
+    if (demoModeActive) {
+        demoModeActive = false;
+        acid303.NoteOff();
+    }
     ProcessCommand();
     if(!pendingResponse)
         spi_slave.DmaReceive(rxBuf, 8, nullptr, SpiRxCallback, nullptr);
@@ -2909,6 +2941,9 @@ static void InitFX()
     synth909.Init(sr);
     synth505.Init(sr);
     acid303.Init(sr);
+
+    /* ── Demo Mode Init ── */
+    demoSeq.Init(sr, &synth808, &synth909, &acid303);
 }
 
 /* ═══════════════════════════════════════════════════════════════════
@@ -2918,60 +2953,99 @@ int main()
 {
     /* ── Hardware init ── */
     hw.Init();
+
+    if(kBootDiagMinimal)
+    {
+        bool led = false;
+        while(1)
+        {
+            led = !led;
+            hw.SetLed(led);
+            for(volatile uint32_t d = 0; d < 900000; ++d)
+                __asm__("nop");
+        }
+    }
+
     hw.SetAudioBlockSize(AUDIO_BLOCK);
     hw.SetAudioSampleRate(SaiHandle::Config::SampleRate::SAI_48KHZ);
 
+    auto Log = [&](const char* fmt, auto... args)
+    {
+        if(kEnableStartLog)
+            hw.PrintLine(fmt, args...);
+    };
+
     /* USB serial debug */
-    hw.StartLog(true);
-    hw.PrintLine("══════════════════════════════════════════");
-    hw.PrintLine("  RED808 DrumMachine — Daisy Seed Slave");
-    hw.PrintLine("  %d pads · %d voices · %d Hz · %d block",
-                   MAX_PADS, MAX_VOICES, SR, AUDIO_BLOCK);
-    hw.PrintLine("  Synth: TR808 · TR909 · TR505 · TB303");
-    hw.PrintLine("══════════════════════════════════════════");
+    if(kEnableStartLog)
+        hw.StartLog(true);
+    Log("══════════════════════════════════════════");
+    Log("  RED808 DrumMachine — Daisy Seed Slave");
+    Log("  %d pads · %d voices · %d Hz · %d block",
+        MAX_PADS, MAX_VOICES, SR, AUDIO_BLOCK);
+    Log("  Synth: TR808 · TR909 · TR505 · TB303");
+    Log("  DEMO MODE: auto-play 3 min");
+    Log("══════════════════════════════════════════");
 
     /* ── Init state ── */
     InitArrays();
-    InitFX();
+    if(kEnableInitFx)
+        InitFX();
 
-    /* ── SD Card (SPI3 master, módulo 6-pin) ── */
-    hw.PrintLine("Montando SD card (SPI3: D0=CS D2=SCK D1=MISO D6=MOSI)...");
-    bool sdOk = InitSD();
-    hw.PrintLine(sdOk ? "SD OK (SPI mode)" : "SD no encontrada");
-    if(sdOk) AutoLoadFromSD();
+    /* ── SD Card DESHABILITADA temporalmente ── */
+    // hw.PrintLine("Montando SD card (SPI3: D0=CS D2=SCK D1=MISO D6=MOSI)...");
+    // bool sdOk = InitSD();
+    // hw.PrintLine(sdOk ? "SD OK (SPI mode)" : "SD no encontrada");
+    // if(sdOk) AutoLoadFromSD();
+    bool sdOk = false;
+    sdPresent = false;
+    Log("SD card: DESHABILITADA (sin hardware)");
 
     /* ── Conteo de samples cargados ── */
     uint8_t loadedCount = 0;
     for(int i = 0; i < MAX_PADS; i++) if(sampleLoaded[i]) loadedCount++;
-    hw.PrintLine("Samples cargados: %d / %d", loadedCount, MAX_PADS);
+    Log("Samples cargados: %d / %d", loadedCount, MAX_PADS);
 
-    /* ── SPI1 Slave (comunicación con ESP32-S3 Master) ── */
-    hw.PrintLine("Iniciando SPI1 slave...");
-    SpiHandle::Config spi_config;
-    spi_config.periph         = SpiHandle::Config::Peripheral::SPI_1;
-    spi_config.mode           = SpiHandle::Config::Mode::SLAVE;
-    spi_config.direction      = SpiHandle::Config::Direction::TWO_LINES;
-    spi_config.datasize       = 8;
-    spi_config.clock_polarity = SpiHandle::Config::ClockPolarity::LOW;
-    spi_config.clock_phase    = SpiHandle::Config::ClockPhase::ONE_EDGE;
-    spi_config.nss            = SpiHandle::Config::NSS::HARD_INPUT;
-    spi_config.baud_prescaler = SpiHandle::Config::BaudPrescaler::PS_128;
-    spi_config.pin_config.sclk = hw.GetPin(8);     /* D8  = PG11 (SPI1_SCK)  */
-    spi_config.pin_config.miso = hw.GetPin(9);     /* D9  = PB4  (SPI1_MISO) */
-    spi_config.pin_config.mosi = hw.GetPin(10);    /* D10 = PB5  (SPI1_MOSI) */
-    spi_config.pin_config.nss  = hw.GetPin(7);     /* D7  = PG10 (SPI1_NSS)  */
-    spi_slave.Init(spi_config);
+    if(kEnableSpiSlave)
+    {
+        /* ── SPI1 Slave (comunicación con ESP32-S3 Master) ── */
+        Log("Iniciando SPI1 slave...");
+        SpiHandle::Config spi_config;
+        spi_config.periph         = SpiHandle::Config::Peripheral::SPI_1;
+        spi_config.mode           = SpiHandle::Config::Mode::SLAVE;
+        spi_config.direction      = SpiHandle::Config::Direction::TWO_LINES;
+        spi_config.datasize       = 8;
+        spi_config.clock_polarity = SpiHandle::Config::ClockPolarity::LOW;
+        spi_config.clock_phase    = SpiHandle::Config::ClockPhase::ONE_EDGE;
+        spi_config.nss            = SpiHandle::Config::NSS::HARD_INPUT;
+        spi_config.baud_prescaler = SpiHandle::Config::BaudPrescaler::PS_128;
+        spi_config.pin_config.sclk = hw.GetPin(8);     /* D8  = PG11 (SPI1_SCK)  */
+        spi_config.pin_config.miso = hw.GetPin(9);     /* D9  = PB4  (SPI1_MISO) */
+        spi_config.pin_config.mosi = hw.GetPin(10);    /* D10 = PB5  (SPI1_MOSI) */
+        spi_config.pin_config.nss  = hw.GetPin(7);     /* D7  = PG10 (SPI1_NSS)  */
+        spi_slave.Init(spi_config);
 
-    spi_slave.DmaReceive(rxBuf, 8, nullptr, SpiRxCallback, nullptr);
-    hw.PrintLine("SPI1 listo (D7=NSS D8=SCK D9=MISO D10=MOSI)");
+        spi_slave.DmaReceive(rxBuf, 8, nullptr, SpiRxCallback, nullptr);
+        Log("SPI1 listo (D7=NSS D8=SCK D9=MISO D10=MOSI)");
+    }
+    else
+    {
+        Log("SPI1: DESHABILITADO (modo standalone demo)");
+    }
 
     /* ── Start Audio ── */
-    hw.PrintLine("Iniciando audio @ %d Hz, %d samples/block", SR, AUDIO_BLOCK);
-    hw.StartAudio(AudioCallback);
+    if(kEnableAudioStart)
+    {
+        Log("Iniciando audio @ %d Hz, %d samples/block", SR, AUDIO_BLOCK);
+        hw.StartAudio(AudioCallback);
+    }
+    else
+    {
+        Log("Audio: DESHABILITADO (diagnostico StartAudio)");
+    }
 
     /* LED = ready */
     hw.SetLed(true);
-    hw.PrintLine(">>> RED808 DRUM MACHINE READY <<<");
+    Log(">>> RED808 DRUM MACHINE READY <<<");
 
     /* ── Main loop ── */
     uint32_t lastBlink = 0;
@@ -2979,7 +3053,7 @@ int main()
 
     while(1){
         /* ── SPI response (NUNCA desde ISR) ── */
-        if(pendingResponse){
+        if(kEnableSpiSlave && pendingResponse){
             pendingResponse = false;
             spi_slave.DmaTransmit(txBuf, pendingTxLen, nullptr, nullptr, nullptr);
             System::Delay(1);

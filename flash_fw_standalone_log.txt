@@ -1,0 +1,81 @@
+dfu-util 0.11
+
+Copyright 2005-2009 Weston Schmidt, Harald Welte and OpenMoko Inc.
+Copyright 2010-2021 Tormod Volden and Stefan Schmidt
+This program is Free Software and has ABSOLUTELY NO WARRANTY
+Please report bugs to http://sourceforge.net/p/dfu-util/tickets/
+
+Opening DFU capable USB device...
+Device ID 0483:df11
+Device DFU version 011a
+Claiming USB DFU Interface...
+Setting Alternate Interface #0 ...
+Determining device status...
+DFU state(2) = dfuIDLE, status(0) = No error condition is present
+DFU mode device DFU version 011a
+Device returned transfer size 4096
+DfuSe interface name: "Flash "
+Downloading element to address = 0x90040000, size = 117408
+
+Erase   	[                         ]   0%            0 bytes
+Erase   	[=                        ]   6%         8192 bytes
+Erase   	[==                       ]  10%        12288 bytes
+Erase   	[===                      ]  13%        16384 bytes
+Erase   	[====                     ]  17%        20480 bytes
+Erase   	[=====                    ]  20%        24576 bytes
+Erase   	[======                   ]  24%        28672 bytes
+Erase   	[=======                  ]  31%        36864 bytes
+Erase   	[========                 ]  34%        40960 bytes
+Erase   	[=========                ]  38%        45056 bytes
+Erase   	[==========               ]  41%        49152 bytes
+Erase   	[===========              ]  45%        53248 bytes
+Erase   	[============             ]  48%        57344 bytes
+Erase   	[=============            ]  52%        61440 bytes
+Erase   	[=============            ]  55%        65536 bytes
+Erase   	[==============           ]  59%        69632 bytes
+Erase   	[===============          ]  62%        73728 bytes
+Erase   	[================         ]  66%        77824 bytes
+Erase   	[=================        ]  69%        81920 bytes
+Erase   	[==================       ]  73%        86016 bytes
+Erase   	[===================      ]  76%        90112 bytes
+Erase   	[====================     ]  80%        94208 bytes
+Erase   	[=====================    ]  87%       102400 bytes
+Erase   	[======================   ]  90%       106496 bytes
+Erase   	[=======================  ]  94%       110592 bytes
+Erase   	[======================== ]  97%       114688 bytes
+Erase   	[=========================] 100%       117408 bytes
+Erase    done.
+
+Download	[                         ]   0%            0 bytes
+Download	[                         ]   3%         4096 bytes
+Download	[=                        ]   6%         8192 bytes
+Download	[==                       ]  10%        12288 bytes
+Download	[===                      ]  13%        16384 bytes
+Download	[====                     ]  17%        20480 bytes
+Download	[=====                    ]  20%        24576 bytes
+Download	[======                   ]  24%        28672 bytes
+Download	[=======                  ]  31%        36864 bytes
+Download	[========                 ]  34%        40960 bytes
+Download	[=========                ]  38%        45056 bytes
+Download	[==========               ]  41%        49152 bytes
+Download	[===========              ]  45%        53248 bytes
+Download	[============             ]  48%        57344 bytes
+Download	[=============            ]  52%        61440 bytes
+Download	[==============           ]  59%        69632 bytes
+Download	[===============          ]  62%        73728 bytes
+Download	[================         ]  66%        77824 bytes
+Download	[=================        ]  69%        81920 bytes
+Download	[==================       ]  73%        86016 bytes
+Download	[===================      ]  76%        90112 bytes
+Download	[====================     ]  80%        94208 bytes
+Download	[=====================    ]  87%       102400 bytes
+Download	[======================   ]  90%       106496 bytes
+Download	[=======================  ]  94%       110592 bytes
+Download	[======================== ]  97%       114688 bytes
+Download	[=========================] 100%       117408 bytes
+Download done.
+File downloaded successfully
+Submitting leave request...
+Transitioning to dfuMANIFEST state
+Warning: Invalid DFU suffix signature
+A valid DFU suffix will be required in a future dfu-util release
