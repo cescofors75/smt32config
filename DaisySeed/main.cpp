@@ -1,7 +1,7 @@
 /* ═══════════════════════════════════════════════════════════════════
  *  RED808 DRUM MACHINE — Daisy Seed Slave
  * ─────────────────────────────────────────────────────────────────
- *  STM32H750 + 64 MB SDRAM | SPI3 slave | Protocolo RED808
+ *  STM32H750 + 64 MB SDRAM | SPI1 slave | Protocolo RED808
  *  44100 Hz · 128 samples/block · 24 pads · 32 voces
  *  Master FX: Delay, Reverb, Chorus, Tremolo, Comp, Wavefolder,
  *             Limiter, Phaser, Flanger, Global Filter
@@ -9,17 +9,31 @@
  *             Pan, Mute/Solo
  *  Per-pad:   Filter, Distortion, Bitcrush, Loop, Reverse, Pitch,
  *             Stutter, Scratch, Turntablism
- *  SD Card:   Carga directa de kits WAV (SDMMC 4-bit)
+ *  SD Card:   Carga de kits WAV vía SPI3 master (módulo 6-pin)
  *
  *  Verificado contra: DAISY_SLAVE_GUIDE.md (ESP32-S3 v1.0)
- *  SPI3: D7=NSS(PA15) D8=MISO/TX(PC12) D9=MOSI/RX(PC11) D10=SCK(PC10)
+ *
+ *  PINOUT REAL (verificado en daisy_seed.h):
+ *  SPI1 (Master comm, SLAVE): D7=PG10/NSS  D8=PG11/SCK
+ *                              D9=PB4/MISO  D10=PB5/MOSI
+ *  SPI3 (SD card, MASTER):     D0=PB12/CS(GPIO)  D2=PC10/SCK
+ *                              D1=PC11/MISO      D6=PC12/MOSI
  * ═══════════════════════════════════════════════════════════════════ */
 
 #include "daisy_seed.h"
+#define USE_DAISYSP_LGPL
 #include "daisysp.h"
+#include "ff_gen_drv.h"
 #include <string.h>
 #include <math.h>
 #include <stdio.h>
+#include <strings.h>
+
+/* Synth engine libraries */
+#include "synth/tr808.h"
+#include "synth/tr909.h"
+#include "synth/tr505.h"
+#include "synth/tb303.h"
 
 using namespace daisy;
 using namespace daisysp;
@@ -27,19 +41,19 @@ using namespace daisysp;
 /* ═══════════════════════════════════════════════════════════════════
  *  1. HARDWARE
  * ═══════════════════════════════════════════════════════════════════ */
-DaisySeed seed;
+DaisySeed hw;
 SpiHandle spi_slave;
 
 /* ═══════════════════════════════════════════════════════════════════
  *  2. CONFIGURACIÓN
  * ═══════════════════════════════════════════════════════════════════ */
-#define SR                 44100
+#define SR                 48000
 #define AUDIO_BLOCK        128
 #define MAX_PADS           24
 #define MAX_VOICES         32
-#define MAX_SAMPLE_BYTES   (96000 * 2)   /* ~2.17 s per pad @ 44100 */
-#define MAX_DELAY_SAMPLES  88200         /* 2 s @ 44100             */
-#define TRACK_ECHO_SIZE    8820          /* 200 ms per track        */
+#define MAX_SAMPLE_BYTES   (96000 * 2)   /* ~2.0 s per pad @ 48000  */
+#define MAX_DELAY_SAMPLES  96000         /* 2 s @ 48000             */
+#define TRACK_ECHO_SIZE    9600          /* 200 ms per track        */
 #define TRACK_FLANGER_SIZE 2048
 
 /* ═══════════════════════════════════════════════════════════════════
@@ -173,6 +187,20 @@ SpiHandle spi_slave;
 #define CMD_GET_EVENTS        0xE4
 #define CMD_PING              0xEE
 #define CMD_RESET             0xEF
+
+/* Synth Engine */
+#define CMD_SYNTH_TRIGGER     0xC0  /* [engine(1), instrument(1), velocity(1)] */
+#define CMD_SYNTH_PARAM       0xC1  /* [engine(1), instrument(1), paramId(1), value(4)] */
+#define CMD_SYNTH_NOTE_ON     0xC2  /* [midiNote(1), accent(1), slide(1)] → 303 */
+#define CMD_SYNTH_NOTE_OFF    0xC3  /* 303 note off */
+#define CMD_SYNTH_303_PARAM   0xC4  /* [paramId(1), value(4)] → 303 params */
+#define CMD_SYNTH_ACTIVE      0xC5  /* [engineMask(1)] enable/disable engines */
+
+/* Synth Engine IDs */
+#define SYNTH_ENGINE_808   0
+#define SYNTH_ENGINE_909   1
+#define SYNTH_ENGINE_505   2
+#define SYNTH_ENGINE_303   3
 
 /* Bulk */
 #define CMD_BULK_TRIGGERS     0xF0
@@ -337,9 +365,9 @@ static volatile float trackPeak[MAX_PADS];
 static volatile float masterPeak = 0.0f;
 
 /* ═══════════════════════════════════════════════════════════════════
- *  10. BIQUAD  (Audio EQ Cookbook – LP/HP/BP/Notch/Peak/Shelf)
+ *  10. BiquadEQ  (Audio EQ Cookbook – LP/HP/BP/Notch/Peak/Shelf)
  * ═══════════════════════════════════════════════════════════════════ */
-struct Biquad {
+struct BiquadEQ {
     float b0=1,b1=0,b2=0,a1=0,a2=0;
     float z1=0,z2=0;
 
@@ -471,7 +499,7 @@ static bool  limiterActive  = false;
 /* ═══════════════════════════════════════════════════════════════════
  *  12. GLOBAL FILTER STATE
  * ═══════════════════════════════════════════════════════════════════ */
-static Biquad  gFilterL, gFilterR;
+static BiquadEQ  gFilterL, gFilterR;
 static uint8_t gFilterType    = FTYPE_NONE;
 static float   gFilterCutoff  = 10000.0f;
 static float   gFilterQ       = 0.707f;
@@ -490,7 +518,7 @@ static bool  padReverse[MAX_PADS];
 static float padPitch[MAX_PADS];
 
 /* Pad filter */
-static Biquad  padFilter[MAX_PADS];
+static BiquadEQ  padFilter[MAX_PADS];
 static uint8_t padFilterType[MAX_PADS];
 static float   padFilterCut[MAX_PADS];
 static float   padFilterQ[MAX_PADS];
@@ -511,7 +539,7 @@ static float padScratchDepth[MAX_PADS];
 static float padScratchCut[MAX_PADS];
 static float padScratchCrackle[MAX_PADS];
 static float padScratchPhase[MAX_PADS];
-static Biquad padScratchFilter[MAX_PADS];
+static BiquadEQ padScratchFilter[MAX_PADS];
 
 /* Turntablism */
 static bool     padTurnOn[MAX_PADS];
@@ -536,7 +564,7 @@ static bool  trackSolo[MAX_PADS];
 static bool  anySolo = false;
 
 /* Per-track filter */
-static Biquad  trkFilter[MAX_PADS];
+static BiquadEQ  trkFilter[MAX_PADS];
 static uint8_t trkFilterType[MAX_PADS];
 static float   trkFilterCut[MAX_PADS];
 static float   trkFilterQ[MAX_PADS];
@@ -571,9 +599,9 @@ static float trkCompRatio[MAX_PADS];
 static float trkCompEnv[MAX_PADS];
 
 /* Per-track EQ (3-band: low shelf 200Hz, mid peak 1kHz, high shelf 4kHz) */
-static Biquad trkEqLow[MAX_PADS];
-static Biquad trkEqMid[MAX_PADS];
-static Biquad trkEqHigh[MAX_PADS];
+static BiquadEQ trkEqLow[MAX_PADS];
+static BiquadEQ trkEqMid[MAX_PADS];
+static BiquadEQ trkEqHigh[MAX_PADS];
 static int8_t trkEqLowDb[MAX_PADS];
 static int8_t trkEqMidDb[MAX_PADS];
 static int8_t trkEqHighDb[MAX_PADS];
@@ -590,12 +618,223 @@ static float    scReleaseK  = 0.1f;
 static float    scEnv       = 0.0f;
 
 /* ═══════════════════════════════════════════════════════════════════
- *  16. SD CARD
+ *  16. SD CARD (SPI3 master — módulo 6 pines)
+ *  Conexión: CS=D0(PB12) SCK=D2(PC10) MISO=D1(PC11) MOSI=D6(PC12)
  * ═══════════════════════════════════════════════════════════════════ */
-static SdmmcHandler   sd;
-static FatFSInterface fsi;
+static SpiHandle  sd_spi;         /* SPI3 master for SD card          */
+static GPIO       sd_cs;           /* D0 = PB12 for CS (GPIO manual)   */
+static FATFS      sdFatFs;        /* FatFS filesystem object           */
 static bool    sdPresent = false;
 static char    currentKitName[32] = "";
+static uint8_t sd_card_type = 0;  /* 0=none 1=SDv1 2=SDv2 6=SDHC      */
+
+/* ── SD SPI low-level helpers ───────────────────────────────────── */
+static inline void SD_CS_LOW()  { sd_cs.Write(false); }
+static inline void SD_CS_HIGH() { sd_cs.Write(true);  }
+
+static uint8_t SD_TxRx(uint8_t tx){
+    uint8_t rx = 0xFF;
+    sd_spi.BlockingTransmitAndReceive(&tx, &rx, 1, 10);
+    return rx;
+}
+
+static bool SD_WaitReady(uint32_t timeout_ms){
+    uint32_t start = System::GetNow();
+    do {
+        if(SD_TxRx(0xFF) == 0xFF) return true;
+    } while((System::GetNow() - start) < timeout_ms);
+    return false;
+}
+
+/* ── SD SPI command protocol ────────────────────────────────────── */
+#define SD_CMD0    (0x40+0)   /* GO_IDLE_STATE          */
+#define SD_CMD8    (0x40+8)   /* SEND_IF_COND           */
+#define SD_CMD9    (0x40+9)   /* SEND_CSD               */
+#define SD_CMD12   (0x40+12)  /* STOP_TRANSMISSION      */
+#define SD_CMD16   (0x40+16)  /* SET_BLOCKLEN           */
+#define SD_CMD17   (0x40+17)  /* READ_SINGLE_BLOCK      */
+#define SD_CMD18   (0x40+18)  /* READ_MULTIPLE_BLOCK    */
+#define SD_CMD24   (0x40+24)  /* WRITE_BLOCK            */
+#define SD_CMD25   (0x40+25)  /* WRITE_MULTIPLE_BLOCK   */
+#define SD_CMD55   (0x40+55)  /* APP_CMD                */
+#define SD_CMD58   (0x40+58)  /* READ_OCR               */
+#define SD_ACMD41  (0xC0+41)  /* SD_SEND_OP_COND (app)  */
+
+static uint8_t SD_SendCmd(uint8_t cmd, uint32_t arg)
+{
+    uint8_t n, res;
+    if(cmd & 0x80){                       /* ACMD: send CMD55 first */
+        cmd &= 0x7F;
+        res = SD_SendCmd(SD_CMD55, 0);
+        if(res > 1) return res;
+    }
+    /* Select card */
+    SD_CS_HIGH(); SD_TxRx(0xFF);
+    SD_CS_LOW();  SD_TxRx(0xFF);
+
+    /* Command packet */
+    SD_TxRx(cmd);
+    SD_TxRx((uint8_t)(arg >> 24));
+    SD_TxRx((uint8_t)(arg >> 16));
+    SD_TxRx((uint8_t)(arg >> 8));
+    SD_TxRx((uint8_t)arg);
+    n = 0x01;
+    if(cmd == SD_CMD0) n = 0x95;          /* Valid CRC for CMD0(0)  */
+    if(cmd == SD_CMD8) n = 0x87;          /* Valid CRC for CMD8     */
+    SD_TxRx(n);
+
+    if(cmd == SD_CMD12) SD_TxRx(0xFF);    /* Skip stuff byte        */
+    n = 10;
+    do { res = SD_TxRx(0xFF); } while((res & 0x80) && --n);
+    return res;
+}
+
+static bool SD_RxDataBlock(uint8_t* buf, uint32_t cnt)
+{
+    uint8_t token;
+    uint32_t start = System::GetNow();
+    do { token = SD_TxRx(0xFF); }
+    while(token == 0xFF && (System::GetNow() - start) < 200);
+    if(token != 0xFE) return false;
+    for(uint32_t i = 0; i < cnt; i++) buf[i] = SD_TxRx(0xFF);
+    SD_TxRx(0xFF); SD_TxRx(0xFF);        /* Discard CRC            */
+    return true;
+}
+
+static bool SD_TxDataBlock(const uint8_t* buf, uint8_t token)
+{
+    if(!SD_WaitReady(500)) return false;
+    SD_TxRx(token);
+    if(token != 0xFD){
+        for(uint32_t i = 0; i < 512; i++) SD_TxRx(buf[i]);
+        SD_TxRx(0xFF); SD_TxRx(0xFF);    /* Dummy CRC              */
+        uint8_t resp = SD_TxRx(0xFF);
+        if((resp & 0x1F) != 0x05) return false;
+    }
+    return true;
+}
+
+/* ── FatFS diskio callbacks (registered via FATFS_LinkDriver) ──── */
+static DSTATUS SPISD_DiskStatus(BYTE lun){
+    return sd_card_type ? 0 : STA_NOINIT;
+}
+
+static DSTATUS SPISD_DiskInit(BYTE lun)
+{
+    uint8_t n, ty, ocr[4];
+    SD_CS_HIGH();
+    for(n = 0; n < 10; n++) SD_TxRx(0xFF);  /* >=74 clocks            */
+
+    ty = 0;
+    if(SD_SendCmd(SD_CMD0, 0) == 1){         /* Enter idle             */
+        uint32_t start = System::GetNow();
+        if(SD_SendCmd(SD_CMD8, 0x1AA) == 1){ /* SDv2 ?                 */
+            for(n = 0; n < 4; n++) ocr[n] = SD_TxRx(0xFF);
+            if(ocr[2] == 0x01 && ocr[3] == 0xAA){
+                while((System::GetNow() - start) < 1000)
+                    if(SD_SendCmd(SD_ACMD41, 1UL << 30) == 0) break;
+                if((System::GetNow() - start) < 1000
+                   && SD_SendCmd(SD_CMD58, 0) == 0){
+                    for(n = 0; n < 4; n++) ocr[n] = SD_TxRx(0xFF);
+                    ty = (ocr[0] & 0x40) ? 6 : 2; /* SDHC(6) or SDv2(2)   */
+                }
+            }
+        } else {
+            if(SD_SendCmd(SD_ACMD41, 0) <= 1){ ty = 1; /* SDv1              */
+                while((System::GetNow() - start) < 1000)
+                    if(SD_SendCmd(SD_ACMD41, 0) == 0) break;
+            }
+            if(ty && SD_SendCmd(SD_CMD16, 512) != 0) ty = 0;
+        }
+    }
+    SD_CS_HIGH(); SD_TxRx(0xFF);
+    sd_card_type = ty;
+    return ty ? 0 : STA_NOINIT;
+}
+
+static DRESULT SPISD_DiskRead(BYTE lun, BYTE* buff, DWORD sector, UINT count)
+{
+    if(!sd_card_type) return RES_NOTRDY;
+    if(!(sd_card_type & 4)) sector *= 512;
+    if(count == 1){
+        if(SD_SendCmd(SD_CMD17, sector) == 0
+           && SD_RxDataBlock(buff, 512)) count = 0;
+    } else {
+        if(SD_SendCmd(SD_CMD18, sector) == 0){
+            do {
+                if(!SD_RxDataBlock(buff, 512)) break;
+                buff += 512;
+            } while(--count);
+            SD_SendCmd(SD_CMD12, 0);
+        }
+    }
+    SD_CS_HIGH(); SD_TxRx(0xFF);
+    return count ? RES_ERROR : RES_OK;
+}
+
+static DRESULT SPISD_DiskWrite(BYTE lun, const BYTE* buff, DWORD sector, UINT count)
+{
+    if(!sd_card_type) return RES_NOTRDY;
+    if(!(sd_card_type & 4)) sector *= 512;
+    if(count == 1){
+        if(SD_SendCmd(SD_CMD24, sector) == 0
+           && SD_TxDataBlock(buff, 0xFE)) count = 0;
+    } else {
+        if(SD_SendCmd(SD_CMD25, sector) == 0){
+            do {
+                if(!SD_TxDataBlock(buff, 0xFC)) break;
+                buff += 512;
+            } while(--count);
+            SD_TxDataBlock(0, 0xFD);
+        }
+    }
+    SD_CS_HIGH(); SD_TxRx(0xFF);
+    return count ? RES_ERROR : RES_OK;
+}
+
+static DRESULT SPISD_DiskIoctl(BYTE lun, BYTE cmd, void* buff)
+{
+    DRESULT res = RES_ERROR;
+    uint8_t csd[16];
+    if(!sd_card_type) return RES_NOTRDY;
+    switch(cmd){
+        case CTRL_SYNC:
+            SD_CS_LOW();
+            if(SD_WaitReady(500)) res = RES_OK;
+            SD_CS_HIGH();
+            break;
+        case GET_SECTOR_COUNT:
+            if(SD_SendCmd(SD_CMD9, 0) == 0 && SD_RxDataBlock(csd, 16)){
+                DWORD n_sec;
+                if((csd[0] >> 6) == 1){
+                    n_sec = ((DWORD)(csd[7]&0x3F)<<16)|((DWORD)csd[8]<<8)|csd[9];
+                    n_sec = (n_sec + 1) << 10;
+                } else {
+                    uint8_t nn = (csd[5]&0x0F)+((csd[10]&0x80)>>7)+((csd[9]&3)<<1)+2;
+                    n_sec = ((DWORD)(csd[8]>>6)+((DWORD)csd[7]<<2)+((DWORD)(csd[6]&3)<<10)+1);
+                    n_sec <<= (nn - 9);
+                }
+                *(DWORD*)buff = n_sec;
+                res = RES_OK;
+            }
+            SD_CS_HIGH(); SD_TxRx(0xFF);
+            break;
+        case GET_SECTOR_SIZE:
+            *(WORD*)buff = 512; res = RES_OK; break;
+        case GET_BLOCK_SIZE:
+            *(DWORD*)buff = 1;  res = RES_OK; break;
+        default: res = RES_PARERR;
+    }
+    return res;
+}
+
+static const Diskio_drvTypeDef SPISD_Driver = {
+    SPISD_DiskInit,
+    SPISD_DiskStatus,
+    SPISD_DiskRead,
+    SPISD_DiskWrite,
+    SPISD_DiskIoctl
+};
 
 /* ═══════════════════════════════════════════════════════════════════
  *  16b. EVENT NOTIFICATION SYSTEM
@@ -664,6 +903,17 @@ static uint8_t PopEvents(NotifyEvent* dst, uint8_t maxEvents)
 static volatile uint32_t spiPktCnt = 0;
 static volatile uint16_t spiErrCnt = 0;
 
+/* ═══════════════════════════════════════════════════════════════════
+ *  17b. SYNTH ENGINE INSTANCES
+ * ═══════════════════════════════════════════════════════════════════ */
+static TR808::Kit synth808;
+static TR909::Kit synth909;
+static TR505::Kit synth505;
+static TB303::Synth acid303;
+
+/* Bitmask: qué engines están activos (bit0=808, bit1=909, bit2=505, bit3=303) */
+static uint8_t synthActiveMask = 0x0F;  /* todos activos por defecto */
+
 /* PRNG for crackle/noise FX */
 static uint32_t noiseState = 0x12345678;
 static uint32_t FastRand(){
@@ -696,7 +946,7 @@ static inline float clampF(float v, float lo, float hi){
     return v < lo ? lo : (v > hi ? hi : v);
 }
 
-static float SoftClip(float x){
+static float MySoftClip(float x){
     if(x >  1.5f) return  1.0f;
     if(x < -1.5f) return -1.0f;
     return x - (x*x*x)/6.75f;
@@ -707,7 +957,7 @@ static float ApplyDist(float s, float drive, uint8_t mode){
     float d = 1.0f + drive * 15.0f;
     s *= d;
     switch(mode){
-        case DMODE_SOFT: s = SoftClip(s); break;
+        case DMODE_SOFT: s = MySoftClip(s); break;
         case DMODE_HARD: s = clampF(s,-1.f,1.f); break;
         case DMODE_TUBE: s = tanhf(s); break;
         case DMODE_FUZZ:
@@ -976,6 +1226,21 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
             else                scEnv -= (scEnv - sideSrc) * scReleaseK;
         }
 
+        /* ── SYNTH ENGINES (síntesis matemática) ── */
+        float synthMix = 0.0f;
+        if (synthActiveMask & (1 << SYNTH_ENGINE_808))
+            synthMix += synth808.Process();
+        if (synthActiveMask & (1 << SYNTH_ENGINE_909))
+            synthMix += synth909.Process();
+        if (synthActiveMask & (1 << SYNTH_ENGINE_505))
+            synthMix += synth505.Process();
+        if (synthActiveMask & (1 << SYNTH_ENGINE_303))
+            synthMix += acid303.Process();
+
+        /* Añadir synths al bus (mono → ambos canales) */
+        busL += synthMix;
+        busR += synthMix;
+
         /* ── MASTER FX CHAIN ── */
         float L = busL * masterGain;
         float R = busR * masterGain;
@@ -1129,7 +1394,7 @@ static void ProcessCommand()
      *  PING
      * ════════════════════════════════════════════ */
     case CMD_PING: {
-        uint32_t echo = 0, uptime = seed.system.GetNow();
+        uint32_t echo = 0, uptime = hw.system.GetNow();
         if(len >= 4) memcpy(&echo, p, 4);
         uint8_t pong[8];
         memcpy(pong,     &echo,   4);
@@ -1759,7 +2024,7 @@ static void ProcessCommand()
                 }
                 f_closedir(&dir);
                 strncpy(currentKitName, lk.kitName, 31);
-                seed.PrintLine("SD: Kit '%s' loaded pads %d-%d",
+                hw.PrintLine("SD: Kit '%s' loaded pads %d-%d",
                                lk.kitName, lk.startPad, padIdx-1);
                 /* Notify Master */
                 uint32_t mask = 0;
@@ -1894,7 +2159,7 @@ static void ProcessCommand()
                      SD_DATA_ROOT, pl.folder, pl.filename);
             if(pl.padIdx < MAX_PADS){
                 bool ok = LoadWavToPad(path, pl.padIdx);
-                seed.PrintLine("SD: Load '%s' → pad %d: %s",
+                hw.PrintLine("SD: Load '%s' → pad %d: %s",
                                pl.filename, pl.padIdx, ok?"OK":"FAIL");
                 if(ok){
                     PushEvent(EVT_SD_SAMPLE_LOADED, 1,
@@ -1937,7 +2202,7 @@ static void ProcessCommand()
         for(int i = 8; i < 16; i++)
             if(sampleLoaded[i]) resp[3] |= (1 << (i-8));
         /* resp[4-7]: uptime ms */
-        uint32_t up = seed.system.GetNow();
+        uint32_t up = hw.system.GetNow();
         memcpy(resp + 4, &up, 4);
         /* resp[8]: SD present */
         resp[8] = sdPresent ? 1 : 0;
@@ -2018,11 +2283,137 @@ static void ProcessCommand()
         anySolo = false;
         masterPeak = 0;
         spiPktCnt = 0; spiErrCnt = 0;
+        /* Reset synth engines */
+        synth808.Init((float)SR);
+        synth909.Init((float)SR);
+        synth505.Init((float)SR);
+        acid303.Init((float)SR);
+        synthActiveMask = 0x0F;
         break;
 
     /* ════════════════════════════════════════════
      *  BULK (0xF0-0xF1)
      * ════════════════════════════════════════════ */
+    /* ════════════════════════════════════════════
+     *  SYNTH ENGINES (0xC0-0xC5)
+     * ════════════════════════════════════════════ */
+    case CMD_SYNTH_TRIGGER:
+        if(len >= 3){
+            uint8_t engine = p[0];
+            uint8_t instrument = p[1];
+            float velocity = p[2] / 127.0f;
+            switch(engine){
+                case SYNTH_ENGINE_808: synth808.Trigger(instrument, velocity); break;
+                case SYNTH_ENGINE_909: synth909.Trigger(instrument, velocity); break;
+                case SYNTH_ENGINE_505: synth505.Trigger(instrument, velocity); break;
+            }
+        }
+        break;
+
+    case CMD_SYNTH_PARAM:
+        if(len >= 7){
+            uint8_t engine = p[0];
+            uint8_t instrument = p[1];
+            uint8_t paramId = p[2];
+            float val; memcpy(&val, p + 3, 4);
+            /* paramId: 0=decay, 1=pitch, 2=tone, 3=volume, 4=snappy */
+            switch(engine){
+                case SYNTH_ENGINE_808:
+                    switch(instrument){
+                        case TR808::INST_KICK:
+                            if(paramId==0) synth808.kick.SetDecay(val);
+                            if(paramId==1) synth808.kick.SetPitch(val);
+                            if(paramId==2) synth808.kick.saturation = clampF(val,0.f,1.f);
+                            if(paramId==3) synth808.kick.volume = clampF(val,0.f,1.f);
+                            break;
+                        case TR808::INST_SNARE:
+                            if(paramId==0) synth808.snare.SetDecay(val);
+                            if(paramId==2) synth808.snare.SetTone(val);
+                            if(paramId==3) synth808.snare.volume = clampF(val,0.f,1.f);
+                            if(paramId==4) synth808.snare.SetSnappy(val);
+                            break;
+                        case TR808::INST_CLAP:
+                            if(paramId==0) synth808.clap.SetDecay(val);
+                            if(paramId==3) synth808.clap.volume = clampF(val,0.f,1.f);
+                            break;
+                        case TR808::INST_HIHAT_C:
+                            if(paramId==0) synth808.hihatC.SetDecay(val);
+                            if(paramId==3) synth808.hihatC.volume = clampF(val,0.f,1.f);
+                            break;
+                        case TR808::INST_HIHAT_O:
+                            if(paramId==0) synth808.hihatO.SetDecay(val);
+                            if(paramId==3) synth808.hihatO.volume = clampF(val,0.f,1.f);
+                            break;
+                        case TR808::INST_COWBELL:
+                            if(paramId==0) synth808.cowbell.SetDecay(val);
+                            if(paramId==3) synth808.cowbell.volume = clampF(val,0.f,1.f);
+                            break;
+                        case TR808::INST_CYMBAL:
+                            if(paramId==0) synth808.cymbal.SetDecay(val);
+                            if(paramId==3) synth808.cymbal.volume = clampF(val,0.f,1.f);
+                            break;
+                        default:
+                            /* Toms, congas: paramId 0=decay, 3=volume */
+                            break;
+                    }
+                    break;
+                case SYNTH_ENGINE_909:
+                    switch(instrument){
+                        case TR909::INST_KICK:
+                            if(paramId==0) synth909.kick.SetDecay(val);
+                            if(paramId==1) synth909.kick.SetPitch(val);
+                            if(paramId==3) synth909.kick.volume = clampF(val,0.f,1.f);
+                            break;
+                        case TR909::INST_SNARE:
+                            if(paramId==0) synth909.snare.SetDecay(val);
+                            if(paramId==2) synth909.snare.SetTone(val);
+                            if(paramId==3) synth909.snare.volume = clampF(val,0.f,1.f);
+                            if(paramId==4) synth909.snare.SetSnappy(val);
+                            break;
+                        default: break;
+                    }
+                    break;
+                case SYNTH_ENGINE_505:
+                    /* 505 param handling similar */
+                    break;
+            }
+        }
+        break;
+
+    case CMD_SYNTH_NOTE_ON:
+        if(len >= 3){
+            uint8_t note = p[0];
+            bool accent = (p[1] != 0);
+            bool slide  = (p[2] != 0);
+            acid303.NoteOn(note, accent, slide);
+        }
+        break;
+
+    case CMD_SYNTH_NOTE_OFF:
+        acid303.NoteOff();
+        break;
+
+    case CMD_SYNTH_303_PARAM:
+        if(len >= 5){
+            uint8_t paramId = p[0];
+            float val; memcpy(&val, p + 1, 4);
+            switch(paramId){
+                case 0: acid303.SetCutoff(val);    break;
+                case 1: acid303.SetResonance(val);  break;
+                case 2: acid303.SetEnvMod(val);     break;
+                case 3: acid303.SetDecay(val);      break;
+                case 4: acid303.SetAccent(val);     break;
+                case 5: acid303.SetSlide(val);      break;
+                case 6: acid303.SetWaveform(val < 0.5f ? TB303::WAVE_SAW : TB303::WAVE_SQUARE); break;
+                case 7: acid303.volume = clampF(val, 0.f, 1.f); break;
+            }
+        }
+        break;
+
+    case CMD_SYNTH_ACTIVE:
+        if(len >= 1) synthActiveMask = p[0];
+        break;
+
     case CMD_BULK_TRIGGERS:
         if(len >= 2){
             uint8_t count = p[0];
@@ -2095,18 +2486,45 @@ static void SpiRxCallback(void* context, SpiHandle::Result result)
 }
 
 /* ═══════════════════════════════════════════════════════════════════
- *  25. SD CARD INIT + AUTO-LOAD
+ *  25. SD CARD INIT (SPI3 master) + AUTO-LOAD
  * ═══════════════════════════════════════════════════════════════════ */
 static bool InitSD()
 {
-    SdmmcHandler::Config sd_config;
-    sd_config.Defaults();
-    sd_config.speed = SdmmcHandler::Speed::FAST;
-    sd.Init(sd_config);
-    fsi.Init(FatFSInterface::Config::MEDIA_SD);
-    FRESULT fr = f_mount(&fsi.GetSDFileSystem(), "/", 1);
-    sdPresent = (fr == FR_OK);
-    return sdPresent;
+    /* ── CS pin (D0 = PB12) as GPIO output, start HIGH ── */
+    sd_cs.Init(hw.GetPin(0), GPIO::Mode::OUTPUT, GPIO::Pull::NOPULL);
+    SD_CS_HIGH();
+
+    /* ── SPI3 master — slow for card init (<=400 kHz) ── */
+    SpiHandle::Config sc;
+    sc.periph         = SpiHandle::Config::Peripheral::SPI_3;
+    sc.mode           = SpiHandle::Config::Mode::MASTER;
+    sc.direction      = SpiHandle::Config::Direction::TWO_LINES;
+    sc.datasize       = 8;
+    sc.clock_polarity = SpiHandle::Config::ClockPolarity::LOW;
+    sc.clock_phase    = SpiHandle::Config::ClockPhase::ONE_EDGE;
+    sc.nss            = SpiHandle::Config::NSS::SOFT;
+    sc.baud_prescaler = SpiHandle::Config::BaudPrescaler::PS_256;  /* ~400 kHz */
+    sc.pin_config.sclk = hw.GetPin(2);   /* D2 = PC10 */
+    sc.pin_config.miso = hw.GetPin(1);   /* D1 = PC11 */
+    sc.pin_config.mosi = hw.GetPin(6);   /* D6 = PC12 */
+    sc.pin_config.nss  = Pin();            /* CS manual via GPIO */
+    sd_spi.Init(sc);
+
+    /* ── Register SPI SD driver with FatFS ── */
+    char sdPath[4];
+    FATFS_LinkDriver(&SPISD_Driver, sdPath);
+
+    /* ── Mount filesystem ── */
+    FRESULT fr = f_mount(&sdFatFs, sdPath, 1);
+    if(fr == FR_OK){
+        sdPresent = true;
+        /* ── Switch to fast SPI for data transfer ── */
+        sc.baud_prescaler = SpiHandle::Config::BaudPrescaler::PS_8;   /* ~12 MHz */
+        sd_spi.Init(sc);
+        return true;
+    }
+    sdPresent = false;
+    return false;
 }
 
 /* Try to load the first .wav from a directory directly into pad slot */
@@ -2313,7 +2731,7 @@ static void AutoLoadFromSD()
 
         if(loaded > 0){
             strncpy(currentKitName, defaultKitNames[k], 31);
-            seed.PrintLine("SD: Loaded %d LIVE PADS from '%s'",
+            hw.PrintLine("SD: Loaded %d LIVE PADS from '%s'",
                            loaded, defaultKitNames[k]);
             /* Build pad mask for event */
             uint32_t bootMask = 0;
@@ -2351,7 +2769,7 @@ static void AutoLoadFromSD()
                 }
                 if(padIdx > 0){
                     strncpy(currentKitName, fno.fname, 31);
-                    seed.PrintLine("SD: Fallback loaded %d LIVE PADS from '%s'",
+                    hw.PrintLine("SD: Fallback loaded %d LIVE PADS from '%s'",
                                    padIdx, fno.fname);
                     uint32_t fbMask = 0;
                     for(int i = 0; i < padIdx; i++)
@@ -2382,7 +2800,7 @@ static void AutoLoadFromSD()
             }
             f_closedir(&dir);
             if(xtraIdx > 16){
-                seed.PrintLine("SD: Loaded %d XTRA PADS from /data/xtra",
+                hw.PrintLine("SD: Loaded %d XTRA PADS from /data/xtra",
                                xtraIdx - 16);
                 uint32_t xtraMask = 0;
                 for(int i = 16; i < xtraIdx; i++)
@@ -2485,6 +2903,12 @@ static void InitFX()
         memset(trkEchoBuf[i], 0, sizeof(trkEchoBuf[i]));
         memset(trkFlgBuf[i],  0, sizeof(trkFlgBuf[i]));
     }
+
+    /* ── Synth Engines Init ── */
+    synth808.Init(sr);
+    synth909.Init(sr);
+    synth505.Init(sr);
+    acid303.Init(sr);
 }
 
 /* ═══════════════════════════════════════════════════════════════════
@@ -2493,37 +2917,38 @@ static void InitFX()
 int main()
 {
     /* ── Hardware init ── */
-    seed.Init();
-    seed.SetAudioBlockSize(AUDIO_BLOCK);
-    seed.SetAudioSampleRate(SaiHandle::Config::SampleRate::SAI_44KHZ);
+    hw.Init();
+    hw.SetAudioBlockSize(AUDIO_BLOCK);
+    hw.SetAudioSampleRate(SaiHandle::Config::SampleRate::SAI_48KHZ);
 
     /* USB serial debug */
-    seed.StartLog(true);
-    seed.PrintLine("══════════════════════════════════════════");
-    seed.PrintLine("  RED808 DrumMachine — Daisy Seed Slave");
-    seed.PrintLine("  %d pads · %d voices · %d Hz · %d block",
+    hw.StartLog(true);
+    hw.PrintLine("══════════════════════════════════════════");
+    hw.PrintLine("  RED808 DrumMachine — Daisy Seed Slave");
+    hw.PrintLine("  %d pads · %d voices · %d Hz · %d block",
                    MAX_PADS, MAX_VOICES, SR, AUDIO_BLOCK);
-    seed.PrintLine("══════════════════════════════════════════");
+    hw.PrintLine("  Synth: TR808 · TR909 · TR505 · TB303");
+    hw.PrintLine("══════════════════════════════════════════");
 
     /* ── Init state ── */
     InitArrays();
     InitFX();
 
-    /* ── SD Card ── */
-    seed.PrintLine("Montando SD card...");
+    /* ── SD Card (SPI3 master, módulo 6-pin) ── */
+    hw.PrintLine("Montando SD card (SPI3: D0=CS D2=SCK D1=MISO D6=MOSI)...");
     bool sdOk = InitSD();
-    seed.PrintLine(sdOk ? "SD OK" : "SD no encontrada");
+    hw.PrintLine(sdOk ? "SD OK (SPI mode)" : "SD no encontrada");
     if(sdOk) AutoLoadFromSD();
 
     /* ── Conteo de samples cargados ── */
     uint8_t loadedCount = 0;
     for(int i = 0; i < MAX_PADS; i++) if(sampleLoaded[i]) loadedCount++;
-    seed.PrintLine("Samples cargados: %d / %d", loadedCount, MAX_PADS);
+    hw.PrintLine("Samples cargados: %d / %d", loadedCount, MAX_PADS);
 
-    /* ── SPI3 Slave ── */
-    seed.PrintLine("Iniciando SPI3 slave...");
+    /* ── SPI1 Slave (comunicación con ESP32-S3 Master) ── */
+    hw.PrintLine("Iniciando SPI1 slave...");
     SpiHandle::Config spi_config;
-    spi_config.periph         = SpiHandle::Config::Peripheral::SPI_3;
+    spi_config.periph         = SpiHandle::Config::Peripheral::SPI_1;
     spi_config.mode           = SpiHandle::Config::Mode::SLAVE;
     spi_config.direction      = SpiHandle::Config::Direction::TWO_LINES;
     spi_config.datasize       = 8;
@@ -2531,22 +2956,22 @@ int main()
     spi_config.clock_phase    = SpiHandle::Config::ClockPhase::ONE_EDGE;
     spi_config.nss            = SpiHandle::Config::NSS::HARD_INPUT;
     spi_config.baud_prescaler = SpiHandle::Config::BaudPrescaler::PS_128;
-    spi_config.pin_config.sclk = seed.GetPin(10);   /* D10 = PC10 */
-    spi_config.pin_config.miso = seed.GetPin(8);     /* D8  = PC12 (Daisy TX) */
-    spi_config.pin_config.mosi = seed.GetPin(9);     /* D9  = PC11 (Daisy RX) */
-    spi_config.pin_config.nss  = seed.GetPin(7);     /* D7  = PA15 */
+    spi_config.pin_config.sclk = hw.GetPin(8);     /* D8  = PG11 (SPI1_SCK)  */
+    spi_config.pin_config.miso = hw.GetPin(9);     /* D9  = PB4  (SPI1_MISO) */
+    spi_config.pin_config.mosi = hw.GetPin(10);    /* D10 = PB5  (SPI1_MOSI) */
+    spi_config.pin_config.nss  = hw.GetPin(7);     /* D7  = PG10 (SPI1_NSS)  */
     spi_slave.Init(spi_config);
 
     spi_slave.DmaReceive(rxBuf, 8, nullptr, SpiRxCallback, nullptr);
-    seed.PrintLine("SPI3 listo (D7=NSS D10=SCK D9=RX D8=TX)");
+    hw.PrintLine("SPI1 listo (D7=NSS D8=SCK D9=MISO D10=MOSI)");
 
     /* ── Start Audio ── */
-    seed.PrintLine("Iniciando audio @ %d Hz, %d samples/block", SR, AUDIO_BLOCK);
-    seed.StartAudio(AudioCallback);
+    hw.PrintLine("Iniciando audio @ %d Hz, %d samples/block", SR, AUDIO_BLOCK);
+    hw.StartAudio(AudioCallback);
 
     /* LED = ready */
-    seed.SetLed(true);
-    seed.PrintLine(">>> RED808 DRUM MACHINE READY <<<");
+    hw.SetLed(true);
+    hw.PrintLine(">>> RED808 DRUM MACHINE READY <<<");
 
     /* ── Main loop ── */
     uint32_t lastBlink = 0;
@@ -2562,11 +2987,11 @@ int main()
         }
 
         /* ── Heartbeat LED ── */
-        uint32_t now = seed.system.GetNow();
+        uint32_t now = hw.system.GetNow();
         if(now - lastBlink > 500){
             lastBlink = now;
             ledState = !ledState;
-            seed.SetLed(ledState);
+            hw.SetLed(ledState);
         }
     }
 }

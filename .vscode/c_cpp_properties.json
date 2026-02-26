@@ -8,10 +8,18 @@
                 "C:/Users/cesco/daisy/libDaisy/src/**",
                 "C:/Users/cesco/daisy/DaisySP/Source",
                 "C:/Users/cesco/daisy/DaisySP/Source/**",
+                "C:/Users/cesco/daisy/DaisySP/DaisySP-LGPL/Source",
+                "C:/Users/cesco/daisy/DaisySP/DaisySP-LGPL/Source/**",
                 "C:/Users/cesco/daisy/libDaisy/Drivers/CMSIS_5/CMSIS/Core/Include",
                 "C:/Users/cesco/daisy/libDaisy/Drivers/STM32H7xx_HAL_Driver/Inc",
+                "C:/Users/cesco/daisy/libDaisy/Drivers/STM32H7xx_HAL_Driver/Inc/Legacy",
                 "C:/Users/cesco/daisy/libDaisy/Drivers/CMSIS-Device/ST/STM32H7xx/Include",
-                "C:/Users/cesco/daisy/libDaisy/Middlewares/Third_Party/FatFs/src"
+                "C:/Users/cesco/daisy/libDaisy/Middlewares/Third_Party/FatFs/src",
+                "C:/Users/cesco/daisy/libDaisy/Middlewares/ST/STM32_USB_Host_Library/Core/Inc",
+                "C:/Users/cesco/daisy/libDaisy/Middlewares/ST/STM32_USB_Host_Library/Class/MSC/Inc",
+                "C:/Users/cesco/daisy/libDaisy/Middlewares/ST/STM32_USB_Host_Library/Class/MIDI/Inc",
+                "C:/Users/cesco/daisy/libDaisy/Middlewares/ST/STM32_USB_Device_Library/Core/Inc",
+                "C:/Users/cesco/daisy/libDaisy/Middlewares/Patched/ST/STM32_USB_Device_Library/Class/CDC/Inc"
             ],
             "defines": [
                 "USE_HAL_DRIVER",
@@ -20,7 +28,8 @@
                 "CORE_CM7",
                 "__FPU_PRESENT=1",
                 "ARM_MATH_CM7",
-                "DATA_IN_D2_SRAM"
+                "DATA_IN_D2_SRAM",
+                "USE_DAISYSP_LGPL"
             ],
             "compilerPath": "C:/Users/cesco/AppData/Roaming/xPacks/@xpack-dev-tools/arm-none-eabi-gcc/14.2.1-1.1.1/.content/bin/arm-none-eabi-gcc.exe",
             "cStandard": "c11",

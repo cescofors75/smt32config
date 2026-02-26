@@ -1,11 +1,14 @@
 # ══════════════════════════════════════════════════════════════════
 #  DrumMachine — Daisy Seed Edition
-#  16-Pad Sampler + FX + SPI Slave (ESP32 compatible)
+#  16-Pad Sampler + FX + SPI Slave + Synth Engines (808/909/505/303)
 # ══════════════════════════════════════════════════════════════════
 
 TARGET = DrumMachine
 
 CPP_SOURCES = main.cpp
+
+# Include path for synth headers
+C_INCLUDES += -I.
 
 OPT = -O2
 
