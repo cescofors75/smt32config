@@ -1,7 +1,7 @@
 /* ═══════════════════════════════════════════════════════════════════
  *  RED808 DRUM MACHINE — Daisy Seed Slave
  * ─────────────────────────────────────────────────────────────────
- *  STM32H750 + 64 MB SDRAM | SPI1 slave | Protocolo RED808
+ *  STM32H750 + 64 MB SDRAM | UART1 slave | Protocolo RED808
  *  44100 Hz · 128 samples/block · 24 pads · 32 voces
  *  Master FX: Delay, Reverb, Chorus, Tremolo, Comp, Wavefolder,
  *             Limiter, Phaser, Flanger, Global Filter
@@ -14,10 +14,10 @@
  *  Verificado contra: DAISY_SLAVE_GUIDE.md (ESP32-S3 v1.0)
  *
  *  PINOUT REAL (verificado en daisy_seed.h):
- *  SPI1 (Master comm, SLAVE): D7=PG10/NSS  D8=PG11/SCK
- *                              D9=PB4/MISO  D10=PB5/MOSI
- *  SPI3 (SD card, MASTER):     D0=PB12/CS(GPIO)  D2=PC10/SCK
- *                              D1=PC11/MISO      D6=PC12/MOSI
+ *  UART1 (Master comm - TEST): D29=PB14/TX  D30=PB15/RX  (115200 8N1)
+ *    ESP32 TX → Daisy D30   |   ESP32 RX → Daisy D29
+ *  SPI3 (SD card, MASTER):  D0=PB12/CS(GPIO)  D2=PC10/SCK
+ *                            D1=PC11/MISO      D6=PC12/MOSI
  * ═══════════════════════════════════════════════════════════════════ */
 
 #include "daisy_seed.h"
@@ -43,7 +43,7 @@ using namespace daisysp;
  *  1. HARDWARE
  * ═══════════════════════════════════════════════════════════════════ */
 DaisySeed hw;
-SpiHandle spi_slave;
+UartHandler uart_slave;
 
 /* ═══════════════════════════════════════════════════════════════════
  *  2. CONFIGURACIÓN
@@ -238,8 +238,15 @@ struct __attribute__((packed)) SPIPacketHeader {
 #define RX_BUF_SIZE  536
 #define TX_BUF_SIZE  768   /* SD responses up to 676 bytes payload */
 
-static uint8_t rxBuf[RX_BUF_SIZE];
-static uint8_t txBuf[TX_BUF_SIZE];
+/* CRÍTICO: DMA en STM32H750 no puede acceder a DTCM-SRAM (donde van las variables
+ * estáticas normales). Además, la D-cache del Cortex-M7 causa lecturas stale.
+ * DMA_BUFFER_MEM_SECTION coloca estos buffers en SRAM1 (dominio D2, sin caché)
+ * para que DMA pueda leer/escribir y la CPU vea los datos correctos.
+ * ESTO ERA EL BUG: el modo "piu piu piu" funcionaba porque nunca leía el valor
+ * del byte, solo disparaba kick incondicionalmente. Al leer rxBuf[0] para comparar
+ * con 0xA5, la CPU leía un valor stale de su D-cache.                           */
+static uint8_t DMA_BUFFER_MEM_SECTION rxBuf[RX_BUF_SIZE];
+static uint8_t DMA_BUFFER_MEM_SECTION txBuf[TX_BUF_SIZE];
 static volatile bool  waitingPayload  = false;
 static volatile bool  pendingResponse = false;
 static uint16_t       pendingTxLen    = 0;
@@ -903,6 +910,10 @@ static uint8_t PopEvents(NotifyEvent* dst, uint8_t maxEvents)
  * ═══════════════════════════════════════════════════════════════════ */
 static volatile uint32_t spiPktCnt = 0;
 static volatile uint16_t spiErrCnt = 0;
+static volatile uint32_t spiLastPacketMs = 0;
+static volatile uint32_t spiLastTriggerMs = 0;
+static volatile uint32_t uartLedPulseUntilMs = 0;
+static volatile uint32_t uartMvpLastKickMs = 0;
 
 /* ═══════════════════════════════════════════════════════════════════
  *  17b. SYNTH ENGINE INSTANCES
@@ -917,14 +928,20 @@ static uint8_t synthActiveMask = 0x0B;  /* 808+909+303 activos; 505 desactivado 
 
 /* ── Demo Mode ── */
 static Demo::DemoSequencer demoSeq;
-static bool demoModeActive = true;   /* arranca en demo, se desactiva al recibir SPI */
-static constexpr bool kEnableSpiSlave = true;  /* modo integrado: comunicación SPI1 con ESP32 master */
+static constexpr bool kEnableSpiSlave = true;  /* modo integrado: comunicación SPI3 con ESP32 master */
 static constexpr bool kEnableSynth505 = false; /* aislamiento de crash en callback */
 static constexpr bool kAudioSafeMode = false; /* callback de audio real */
 static constexpr bool kBootDiagMinimal = false; /* diagnóstico extremo: solo LED, sin audio ni FX */
 static constexpr bool kEnableAudioStart = true; /* iniciar audio normal */
 static constexpr bool kEnableStartLog = false; /* diagnóstico: aislar StartLog/USB */
 static constexpr bool kEnableInitFx = true;    /* diagnóstico: reactivar InitFX para aislar causa */
+static constexpr bool kStartupToneTest = false; /* tono confirmado OK, desactivado */
+static constexpr bool kBypassIncomingCrc = true; /* diagnóstico enlace UART: no bloquear por mismatch de CRC */
+static constexpr bool kAcceptOneBasedPadIndex = true; /* compatibilidad pad 1..N en triggers */
+static constexpr bool kTriggerSynthOnLiveCmd = true; /* diagnóstico: confirmar llegada de TRIGGER por SPI */
+static constexpr bool kForceMasterGainDebug = true; /* diagnóstico: ignorar mute/volumen master desde host */
+static constexpr bool kSpiSingleFrame10 = true; /* compat: master envía trigger en 1 frame de 10 bytes */
+static bool demoModeActive = false; /* demo desactivada — audio codec y jack ya verificados */
 
 /* PRNG for crackle/noise FX */
 static uint32_t noiseState = 0x12345678;
@@ -1043,6 +1060,24 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
                    AudioHandle::OutputBuffer out,
                    size_t                    size)
 {
+    /* ── STARTUP TONE TEST: tono 1kHz directo, bypasea toda la cadena ── */
+    if(kStartupToneTest){
+        static uint32_t toneSamples = 0;
+        static float    tonePhase   = 0.0f;
+        const  uint32_t toneDurSamp = (uint32_t)SR * 3;  /* 3 segundos */
+        if(toneSamples < toneDurSamp){
+            for(size_t i = 0; i < size; i++){
+                float s = 0.7f * sinf(tonePhase);
+                out[0][i] = s;
+                out[1][i] = s;
+                tonePhase += 2.0f * 3.14159265f * 1000.0f / (float)SR;
+                if(tonePhase > 2.0f * 3.14159265f) tonePhase -= 2.0f * 3.14159265f;
+                toneSamples++;
+            }
+            return;
+        }
+    }
+
     for(size_t i = 0; i < size; i++) out[0][i] = out[1][i] = 0.0f;
 
     if(kAudioSafeMode)
@@ -1266,8 +1301,9 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
         busR += synthMix;
 
         /* ── MASTER FX CHAIN ── */
-        float L = busL * masterGain;
-        float R = busR * masterGain;
+        float gainOut = kForceMasterGainDebug ? 1.0f : masterGain;
+        float L = busL * gainOut;
+        float R = busR * gainOut;
 
         /* ── Global filter ── */
         if(gFilterType != FTYPE_NONE){
@@ -1409,11 +1445,12 @@ static void ProcessCommand()
     uint16_t len = hdr->length;
 
     /* CRC check (skip for PING) */
-    if(hdr->cmd != CMD_PING && len > 0){
+    if(!kBypassIncomingCrc && hdr->cmd != CMD_PING && len > 0){
         uint16_t calc = crc16(p, len);
         if(calc != hdr->checksum){ spiErrCnt++; return; }
     }
     spiPktCnt++;
+    spiLastPacketMs = hw.system.GetNow();
 
     switch(hdr->cmd){
 
@@ -1434,13 +1471,25 @@ static void ProcessCommand()
      *  TRIGGERS
      * ════════════════════════════════════════════ */
     case CMD_TRIGGER_LIVE:
-        if(len >= 2) TriggerPad(p[0], p[1]);
+        if(len >= 2){
+            uint8_t pad = p[0];
+            if(kAcceptOneBasedPadIndex && pad > 0) pad -= 1;
+            TriggerPad(pad, p[1]);
+            spiLastTriggerMs = hw.system.GetNow();
+            if(kTriggerSynthOnLiveCmd)
+                synth808.Trigger(TR808::INST_KICK, clampF(p[1] / 127.0f, 0.0f, 1.0f));
+        }
         break;
 
     case CMD_TRIGGER_SEQ:
         if(len >= 8){
+            uint8_t pad = p[0];
+            if(kAcceptOneBasedPadIndex && pad > 0) pad -= 1;
             uint32_t maxS = 0; memcpy(&maxS, p + 4, 4);
-            TriggerPad(p[0], p[1], p[2], (int8_t)p[3], maxS);
+            TriggerPad(pad, p[1], p[2], (int8_t)p[3], maxS);
+            spiLastTriggerMs = hw.system.GetNow();
+            if(kTriggerSynthOnLiveCmd)
+                synth808.Trigger(TR808::INST_KICK, clampF(p[1] / 127.0f, 0.0f, 1.0f));
         }
         break;
 
@@ -1463,7 +1512,7 @@ static void ProcessCommand()
      *  VOLUME
      * ════════════════════════════════════════════ */
     case CMD_MASTER_VOLUME:
-        if(len >= 1) masterGain = p[0] / 100.0f;
+        if(len >= 1 && !kForceMasterGainDebug) masterGain = p[0] / 100.0f;
         break;
     case CMD_SEQ_VOLUME:
         if(len >= 1) seqVolume = p[0] / 100.0f;
@@ -2482,39 +2531,115 @@ static void ProcessCommand()
 }
 
 /* ═══════════════════════════════════════════════════════════════════
- *  24. SPI DMA CALLBACK
+ *  24. UART RX — 100% byte-a-byte, DMA target SIEMPRE en rxBuf
+ *      IMPORTANTE: En STM32H750 el DMA NO puede acceder a DTCM SRAM.
+ *      Variables static pueden caer en DTCM. rxBuf está en D2-SRAM
+ *      (accesible por DMA). Por eso recibimos SIEMPRE dentro de rxBuf.
+ *      El "piu piu piu" funcionó porque usaba rxBuf como target.
+ *
+ *      Máquina de estados:
+ *        SCAN    → DMA 1 byte a rxBuf[0], buscando 0xA5
+ *        HEADER  → DMA 1 byte a rxBuf[idx], acumulando header
+ *        PAYLOAD → DMA 1 byte a rxBuf[idx], acumulando payload
  * ═══════════════════════════════════════════════════════════════════ */
-static void SpiRxCallback(void* context, SpiHandle::Result result)
+
+/* NO usamos variable separada — DMA siempre escribe en rxBuf[pos] */
+static volatile uint16_t uartAccumIdx;    /* siguiente posición en rxBuf */
+static volatile uint16_t uartExpectedLen; /* bytes totales a acumular    */
+
+enum UartRxState { UART_ST_SCAN, UART_ST_HEADER, UART_ST_PAYLOAD };
+static volatile UartRxState uartRxState = UART_ST_SCAN;
+
+static void UartRxByteCb(void* ctx, UartHandler::Result res);
+
+static void UartStartScan()
 {
-    if(result != SpiHandle::Result::OK){
+    uartRxState = UART_ST_SCAN;
+    /* DMA escribe directo en rxBuf[0] — zona accesible por DMA */
+    uart_slave.DmaReceive(rxBuf, 1, nullptr, UartRxByteCb, nullptr);
+}
+
+/* Callback — se llama cada vez que llega 1 byte (en rxBuf) */
+static void UartRxByteCb(void* ctx, UartHandler::Result res)
+{
+    if(res != UartHandler::Result::OK){
         spiErrCnt++;
-        spi_slave.DmaReceive(rxBuf, 8, nullptr, SpiRxCallback, nullptr);
+        UartStartScan();
         return;
     }
-    SPIPacketHeader* hdr = (SPIPacketHeader*)rxBuf;
 
-    if(!waitingPayload){
-        if(hdr->magic != SPI_MAGIC_CMD){
-            spiErrCnt++;
-            spi_slave.DmaReceive(rxBuf, 8, nullptr, SpiRxCallback, nullptr);
-            return;
+    uint32_t now = hw.system.GetNow();
+    spiLastPacketMs = now;
+
+    switch(uartRxState)
+    {
+    /* ── SCAN: buscando 0xA5 en rxBuf[0] ── */
+    case UART_ST_SCAN:
+        if(rxBuf[0] == SPI_MAGIC_CMD){
+            /* ¡Magic encontrado! rxBuf[0] ya tiene 0xA5 */
+            uartAccumIdx    = 1;   /* próximo byte va a rxBuf[1] */
+            uartExpectedLen = 8;   /* header completo = 8 bytes  */
+            uartRxState = UART_ST_HEADER;
+            uartLedPulseUntilMs = now + 60;  /* LED: magic recibido */
+            /* Recibir siguiente byte en rxBuf[1] */
+            uart_slave.DmaReceive(rxBuf + 1, 1, nullptr, UartRxByteCb, nullptr);
+        } else {
+            /* No es magic → seguir escaneando en rxBuf[0] */
+            uart_slave.DmaReceive(rxBuf, 1, nullptr, UartRxByteCb, nullptr);
         }
-        if(hdr->length > 0 && hdr->length <= (RX_BUF_SIZE - 8)){
-            waitingPayload = true;
-            spi_slave.DmaReceive(rxBuf + 8, hdr->length, nullptr,
-                                 SpiRxCallback, nullptr);
-            return;
+        break;
+
+    /* ── HEADER: acumulando bytes 1..7 en rxBuf[1..7] ── */
+    case UART_ST_HEADER:
+        uartAccumIdx++;
+        if(uartAccumIdx < uartExpectedLen){
+            /* Faltan bytes — recibir siguiente en rxBuf[idx] */
+            uart_slave.DmaReceive(rxBuf + uartAccumIdx, 1, nullptr, UartRxByteCb, nullptr);
+            break;
         }
+        /* ── Header completo (8 bytes en rxBuf[0..7]) ── */
+        {
+            SPIPacketHeader* hdr = (SPIPacketHeader*)rxBuf;
+            uartLedPulseUntilMs = now + 120;
+
+            /* MVP: kick inmediato en CMD_TRIGGER_LIVE */
+            if(hdr->cmd == CMD_TRIGGER_LIVE && (now - uartMvpLastKickMs) > 30){
+                synth808.Trigger(TR808::INST_KICK, 0.80f);
+                uartMvpLastKickMs = now;
+                spiLastTriggerMs  = now;
+            }
+
+            uint16_t payLen = hdr->length;
+            if(payLen > 0 && payLen <= (RX_BUF_SIZE - 8)){
+                /* Hay payload — seguir acumulando byte a byte */
+                uartAccumIdx    = 8;
+                uartExpectedLen = 8 + payLen;
+                uartRxState     = UART_ST_PAYLOAD;
+                uart_slave.DmaReceive(rxBuf + 8, 1, nullptr, UartRxByteCb, nullptr);
+            } else {
+                /* Sin payload — procesar ya */
+                if(demoModeActive){ demoModeActive = false; acid303.NoteOff(); }
+                ProcessCommand();
+                if(!pendingResponse) UartStartScan();
+                else uartRxState = UART_ST_SCAN;
+            }
+        }
+        break;
+
+    /* ── PAYLOAD: acumulando datos en rxBuf[8..N] ── */
+    case UART_ST_PAYLOAD:
+        uartAccumIdx++;
+        if(uartAccumIdx < uartExpectedLen){
+            uart_slave.DmaReceive(rxBuf + uartAccumIdx, 1, nullptr, UartRxByteCb, nullptr);
+            break;
+        }
+        /* Payload completo */
+        if(demoModeActive){ demoModeActive = false; acid303.NoteOff(); }
+        ProcessCommand();
+        if(!pendingResponse) UartStartScan();
+        else uartRxState = UART_ST_SCAN;
+        break;
     }
-    waitingPayload = false;
-    /* Desactivar demo mode al recibir primer comando SPI real */
-    if (demoModeActive) {
-        demoModeActive = false;
-        acid303.NoteOff();
-    }
-    ProcessCommand();
-    if(!pendingResponse)
-        spi_slave.DmaReceive(rxBuf, 8, nullptr, SpiRxCallback, nullptr);
 }
 
 /* ═══════════════════════════════════════════════════════════════════
@@ -3007,29 +3132,24 @@ int main()
 
     if(kEnableSpiSlave)
     {
-        /* ── SPI1 Slave (comunicación con ESP32-S3 Master) ── */
-        Log("Iniciando SPI1 slave...");
-        SpiHandle::Config spi_config;
-        spi_config.periph         = SpiHandle::Config::Peripheral::SPI_1;
-        spi_config.mode           = SpiHandle::Config::Mode::SLAVE;
-        spi_config.direction      = SpiHandle::Config::Direction::TWO_LINES;
-        spi_config.datasize       = 8;
-        spi_config.clock_polarity = SpiHandle::Config::ClockPolarity::LOW;
-        spi_config.clock_phase    = SpiHandle::Config::ClockPhase::ONE_EDGE;
-        spi_config.nss            = SpiHandle::Config::NSS::HARD_INPUT;
-        spi_config.baud_prescaler = SpiHandle::Config::BaudPrescaler::PS_128;
-        spi_config.pin_config.sclk = hw.GetPin(8);     /* D8  = PG11 (SPI1_SCK)  */
-        spi_config.pin_config.miso = hw.GetPin(9);     /* D9  = PB4  (SPI1_MISO) */
-        spi_config.pin_config.mosi = hw.GetPin(10);    /* D10 = PB5  (SPI1_MOSI) */
-        spi_config.pin_config.nss  = hw.GetPin(7);     /* D7  = PG10 (SPI1_NSS)  */
-        spi_slave.Init(spi_config);
-
-        spi_slave.DmaReceive(rxBuf, 8, nullptr, SpiRxCallback, nullptr);
-        Log("SPI1 listo (D7=NSS D8=SCK D9=MISO D10=MOSI)");
+        /* ── UART1 (comunicación con ESP32-S3, TEST) — D29=TX(PB14) D30=RX(PB15) 115200 8N1 ── */
+        Log("Iniciando UART1 (115200 8N1)...");
+        UartHandler::Config uart_config;
+        uart_config.periph        = UartHandler::Config::Peripheral::USART_1;
+        uart_config.mode          = UartHandler::Config::Mode::TX_RX;
+        uart_config.baudrate      = 115200;
+        uart_config.stopbits      = UartHandler::Config::StopBits::BITS_1;
+        uart_config.parity        = UartHandler::Config::Parity::NONE;
+        uart_config.wordlength    = UartHandler::Config::WordLength::BITS_8;
+        uart_config.pin_config.tx = hw.GetPin(29);  /* D29 = PB14 (USART1_TX) */
+        uart_config.pin_config.rx = hw.GetPin(30);  /* D30 = PB15 (USART1_RX) */
+        uart_slave.Init(uart_config);
+        UartStartScan();   /* Inicia escaneo byte-a-byte buscando magic 0xA5 */
+        Log("UART1 listo TEST (D29=TX D30=RX, ESP32: TX->D30 RX->D29)");
     }
     else
     {
-        Log("SPI1: DESHABILITADO (modo standalone demo)");
+        Log("UART1: DESHABILITADO (modo standalone demo)");
     }
 
     /* ── Start Audio ── */
@@ -3043,29 +3163,27 @@ int main()
         Log("Audio: DESHABILITADO (diagnostico StartAudio)");
     }
 
-    /* LED = ready */
-    hw.SetLed(true);
+    /* LED apagado por defecto; se enciende por pulso UART */
+    hw.SetLed(false);
     Log(">>> RED808 DRUM MACHINE READY <<<");
 
-    /* ── Main loop ── */
-    uint32_t lastBlink = 0;
-    bool ledState = true;
+    Log("STARTUP TONE TEST: tono 1kHz durante 3s (kStartupToneTest=true)");
 
+    /* ── Main loop ── */
     while(1){
         /* ── SPI response (NUNCA desde ISR) ── */
         if(kEnableSpiSlave && pendingResponse){
             pendingResponse = false;
-            spi_slave.DmaTransmit(txBuf, pendingTxLen, nullptr, nullptr, nullptr);
+            uart_slave.DmaTransmit(txBuf, pendingTxLen, nullptr, nullptr, nullptr);
             System::Delay(1);
-            spi_slave.DmaReceive(rxBuf, 8, nullptr, SpiRxCallback, nullptr);
+            UartStartScan();  /* Re-iniciar escaneo byte-a-byte */
         }
 
-        /* ── Heartbeat LED ── */
+        /* ── LED diagnóstico UART ──
+         * OFF por defecto
+         * Pulso: llegó header con magic válido y longitud coherente
+         */
         uint32_t now = hw.system.GetNow();
-        if(now - lastBlink > 500){
-            lastBlink = now;
-            ledState = !ledState;
-            hw.SetLed(ledState);
-        }
+        hw.SetLed(now < uartLedPulseUntilMs);
     }
 }

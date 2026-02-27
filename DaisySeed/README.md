@@ -13,15 +13,17 @@ SPI3 slave — protocolo RED808 compatible con **ESP32-S3** master.
 
 ## Conexiones
 
-### SPI3: ESP32-S3 → Daisy Seed
+### SPI3: ESP32-S3 (Master) ↔ Daisy Seed (Slave)
 
-| Señal | ESP32-S3 GPIO | Daisy Pin | STM32H750 |
-|-------|---------------|-----------|------------|
-| SCK   | GPIO 12       | **D10**   | PC10 (SPI3_SCK) |
-| MOSI  | GPIO 11       | **D9**    | PC11 (SPI3_MOSI/RX) |
-| MISO  | GPIO 13       | **D8**    | PC12 (SPI3_MISO/TX) |
-| CS    | GPIO 10       | **D7**    | PA15 (SPI3_NSS) |
-| GND   | GND           | GND       | — |
+| Señal SPI | ESP32-S3 (ejemplo) | Daisy Pin | STM32H750 |
+|-----------|---------------------|-----------|-----------|
+| SCK       | GPIO 12             | **D10**   | PC10 (SPI3_SCK) |
+| MOSI      | GPIO 11             | **D9**    | PC11 (SPI3_MOSI / RX slave) |
+| MISO      | GPIO 13             | **D8**    | PC12 (SPI3_MISO / TX slave) |
+| CS/NSS    | GPIO 10             | **D7**    | PA15 (SPI3_NSS) |
+| GND       | GND                 | GND       | — |
+
+> En ESP32-S3 puedes usar otros GPIO si configuras el bus SPI por software con los mismos roles de señal.
 
 > **SPI Mode 0**, MSB first, 8-bit, Hardware NSS.  
 > Bring-up @ 2 MHz → estable @ 20 MHz.

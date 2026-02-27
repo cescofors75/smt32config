@@ -1,0 +1,25 @@
+dfu-util 0.11
+
+Copyright 2005-2009 Weston Schmidt, Harald Welte and OpenMoko Inc.
+Copyright 2010-2021 Tormod Volden and Stefan Schmidt
+This program is Free Software and has ABSOLUTELY NO WARRANTY
+Please report bugs to http://sourceforge.net/p/dfu-util/tickets/
+
+libusb version 1.0.24 (11650)
+Opening DFU capable USB device...
+Device ID 0483:df11
+Device DFU version 011a
+DFU attributes: (0x0b) bitCanDnload bitCanUpload bitWillDetach
+Detach timeout 255 ms
+Claiming USB DFU Interface...
+Setting Alternate Interface #0 ...
+Determining device status...
+DFU state(2) = dfuIDLE, status(0) = No error condition is present
+DFU mode device DFU version 011a
+Device returned transfer size 1024
+DfuSe interface name: "Internal Flash   "
+Memory segment at 0x08000000  16 x 131072 = 2097152 (rew)
+Downloading element to address = 0x90040000, size = 140824
+Warning: Invalid DFU suffix signature
+A valid DFU suffix will be required in a future dfu-util release
+Last page at 0x90062617 is not writeable
