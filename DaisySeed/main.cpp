@@ -923,21 +923,54 @@ static TR909::Kit synth909;
 static TR505::Kit synth505;
 static TB303::Synth acid303;
 
+/* ═══════════════════════════════════════════════════════════════════
+ *  Tabla de remap: padIndex del ESP32 → TR808::InstrumentId
+ *  ESP32 envía: 0=BD 1=SD 2=CH 3=OH 4=CY 5=CP 6=RS 7=CB
+ *               8=LT 9=MT 10=HT 11=MA 12=CL 13=HC 14=MC 15=LC
+ * ═══════════════════════════════════════════════════════════════════ */
+static const uint8_t padTo808[16] = {
+    TR808::INST_KICK,      /* pad 0  = BD  → INST_KICK (0)      */
+    TR808::INST_SNARE,     /* pad 1  = SD  → INST_SNARE (1)     */
+    TR808::INST_HIHAT_C,   /* pad 2  = CH  → INST_HIHAT_C (3)   */
+    TR808::INST_HIHAT_O,   /* pad 3  = OH  → INST_HIHAT_O (4)   */
+    TR808::INST_CYMBAL,    /* pad 4  = CY  → INST_CYMBAL (15)   */
+    TR808::INST_CLAP,      /* pad 5  = CP  → INST_CLAP (2)      */
+    TR808::INST_RIMSHOT,   /* pad 6  = RS  → INST_RIMSHOT (13)  */
+    TR808::INST_COWBELL,   /* pad 7  = CB  → INST_COWBELL (14)  */
+    TR808::INST_LOW_TOM,   /* pad 8  = LT  → INST_LOW_TOM (5)  */
+    TR808::INST_MID_TOM,   /* pad 9  = MT  → INST_MID_TOM (6)  */
+    TR808::INST_HI_TOM,    /* pad 10 = HT  → INST_HI_TOM (7)   */
+    TR808::INST_MARACAS,   /* pad 11 = MA  → INST_MARACAS (12)  */
+    TR808::INST_CLAVES,    /* pad 12 = CL  → INST_CLAVES (11)   */
+    TR808::INST_HI_CONGA,  /* pad 13 = HC  → INST_HI_CONGA (10) */
+    TR808::INST_MID_CONGA, /* pad 14 = MC  → INST_MID_CONGA (9) */
+    TR808::INST_LOW_CONGA, /* pad 15 = LC  → INST_LOW_CONGA (8) */
+};
+
+static inline void Synth808TriggerByPad(uint8_t padIdx, float velocity)
+{
+    if(padIdx < 16)
+        synth808.Trigger(padTo808[padIdx], velocity);
+    else
+        synth808.Trigger(TR808::INST_KICK, velocity); /* fallback */
+}
+
 /* Bitmask: qué engines están activos (bit0=808, bit1=909, bit2=505, bit3=303) */
-static uint8_t synthActiveMask = 0x0B;  /* 808+909+303 activos; 505 desactivado por estabilidad */
+static uint8_t synthActiveMask = 0x0F;  /* 808+909+505+303 activos para demo de arranque completa */
 
 /* ── Demo Mode ── */
 static Demo::DemoSequencer demoSeq;
 static constexpr bool kEnableSpiSlave = true;  /* modo integrado: comunicación SPI3 con ESP32 master */
-static constexpr bool kEnableSynth505 = false; /* aislamiento de crash en callback */
+static constexpr bool kEnableSynth505 = true;  /* habilitado para demo completa de arranque */
 static constexpr bool kAudioSafeMode = false; /* callback de audio real */
 static constexpr bool kBootDiagMinimal = false; /* diagnóstico extremo: solo LED, sin audio ni FX */
 static constexpr bool kEnableAudioStart = true; /* iniciar audio normal */
 static constexpr bool kEnableStartLog = false; /* diagnóstico: aislar StartLog/USB */
 static constexpr bool kEnableInitFx = true;    /* diagnóstico: reactivar InitFX para aislar causa */
 static constexpr bool kStartupToneTest = false; /* tono confirmado OK, desactivado */
+static constexpr bool kStartup808SelfTest = true; /* autotest al arranque: 16 instrumentos + mini tema 5s */
 static constexpr bool kBypassIncomingCrc = true; /* diagnóstico enlace UART: no bloquear por mismatch de CRC */
-static constexpr bool kAcceptOneBasedPadIndex = true; /* compatibilidad pad 1..N en triggers */
+static constexpr bool kAcceptOneBasedPadIndex = false; /* ESP32 envía 0-based (pad 0=BD, 1=SD, etc.) */
 static constexpr bool kTriggerSynthOnLiveCmd = true; /* diagnóstico: confirmar llegada de TRIGGER por SPI */
 static constexpr bool kForceMasterGainDebug = true; /* diagnóstico: ignorar mute/volumen master desde host */
 static constexpr bool kSpiSingleFrame10 = true; /* compat: master envía trigger en 1 frame de 10 bytes */
@@ -973,6 +1006,206 @@ static uint16_t crc16(const uint8_t* d, uint16_t len){
  * ═══════════════════════════════════════════════════════════════════ */
 static inline float clampF(float v, float lo, float hi){
     return v < lo ? lo : (v > hi ? hi : v);
+}
+
+/* Forward decl: usado por el startup self-test */
+static void TriggerPad(uint8_t pad, uint8_t velocity,
+                       uint8_t trkVol, int8_t pan,
+                       uint32_t maxSamples);
+
+/* ═══════════════════════════════════════════════════════════════════
+ *  Startup self-test en fases
+ *  1) Samplers WAV cargados (pad por pad)
+ *  2) TR808 instrumentos (uno a uno)
+ *  3) TR909 instrumentos (uno a uno)
+ *  4) TR505 instrumentos (uno a uno)
+ *  5) TB303 notas (una a una)
+ * ═══════════════════════════════════════════════════════════════════ */
+static void RunStartup808SelfTest(uint32_t nowMs)
+{
+    if(!kStartup808SelfTest)
+        return;
+
+    enum Phase : uint8_t {
+        PH_IDLE = 0,
+        PH_SCAN_SAMPLES,
+        PH_SCAN_808,
+        PH_SCAN_909,
+        PH_SCAN_505,
+        PH_SCAN_303_ON,
+        PH_SCAN_303_OFF,
+        PH_DONE
+    };
+    static Phase    phase = PH_IDLE;
+    static uint32_t nextMs = 0;
+    static uint8_t  padIdx = 0;
+    static uint8_t  inst808Idx = 0;
+    static uint8_t  inst909Idx = 0;
+    static uint8_t  inst505Idx = 0;
+    static uint8_t  note303Idx = 0;
+
+    static const uint32_t kPauseSampleMs = 380;
+    static const uint32_t kPauseSynthMs  = 360;
+    static const uint32_t kPausePhaseMs  = 560;
+    static const uint32_t kPause303OnMs  = 320;
+    static const uint32_t kPause303OffMs = 220;
+
+    static const uint8_t inst808List[16] = {
+        TR808::INST_KICK,
+        TR808::INST_SNARE,
+        TR808::INST_CLAP,
+        TR808::INST_HIHAT_C,
+        TR808::INST_HIHAT_O,
+        TR808::INST_LOW_TOM,
+        TR808::INST_MID_TOM,
+        TR808::INST_HI_TOM,
+        TR808::INST_LOW_CONGA,
+        TR808::INST_MID_CONGA,
+        TR808::INST_HI_CONGA,
+        TR808::INST_CLAVES,
+        TR808::INST_MARACAS,
+        TR808::INST_RIMSHOT,
+        TR808::INST_COWBELL,
+        TR808::INST_CYMBAL,
+    };
+
+    static const uint8_t inst909List[] = {
+        TR909::INST_KICK,
+        TR909::INST_SNARE,
+        TR909::INST_CLAP,
+        TR909::INST_HIHAT_C,
+        TR909::INST_HIHAT_O,
+        TR909::INST_LOW_TOM,
+        TR909::INST_MID_TOM,
+        TR909::INST_HI_TOM,
+        TR909::INST_RIDE,
+        TR909::INST_CRASH,
+        TR909::INST_RIMSHOT,
+    };
+
+    static const uint8_t inst505List[] = {
+        TR505::INST_KICK,
+        TR505::INST_SNARE,
+        TR505::INST_CLAP,
+        TR505::INST_HIHAT_C,
+        TR505::INST_HIHAT_O,
+        TR505::INST_LOW_TOM,
+        TR505::INST_MID_TOM,
+        TR505::INST_HI_TOM,
+        TR505::INST_COWBELL,
+        TR505::INST_CYMBAL,
+        TR505::INST_RIMSHOT,
+    };
+
+    static const uint8_t notes303[] = {
+        36, 38, 41, 43, 45, 48, 50, 53
+    };
+
+    if(phase == PH_IDLE)
+    {
+        phase   = PH_SCAN_SAMPLES;
+        nextMs  = nowMs + 250;
+        padIdx  = 0;
+        inst808Idx = 0;
+        inst909Idx = 0;
+        inst505Idx = 0;
+        note303Idx = 0;
+        return;
+    }
+
+    if(nowMs < nextMs)
+        return;
+
+    if(phase == PH_SCAN_SAMPLES)
+    {
+        while(padIdx < MAX_PADS && !sampleLoaded[padIdx])
+            padIdx++;
+
+        if(padIdx < MAX_PADS)
+        {
+            TriggerPad(padIdx, 115, 100, 0, 0);
+            padIdx++;
+            nextMs = nowMs + kPauseSampleMs;
+            return;
+        }
+
+        phase = PH_SCAN_808;
+        inst808Idx = 0;
+        nextMs = nowMs + kPausePhaseMs;
+        return;
+    }
+
+    if(phase == PH_SCAN_808)
+    {
+        synth808.Trigger(inst808List[inst808Idx], 0.90f);
+        inst808Idx++;
+        nextMs = nowMs + kPauseSynthMs;
+        if(inst808Idx >= (sizeof(inst808List) / sizeof(inst808List[0])))
+        {
+            phase = PH_SCAN_909;
+            inst909Idx = 0;
+            nextMs = nowMs + kPausePhaseMs;
+        }
+
+        return;
+    }
+
+    if(phase == PH_SCAN_909)
+    {
+        synth909.Trigger(inst909List[inst909Idx], 0.88f);
+        inst909Idx++;
+        nextMs = nowMs + kPauseSynthMs;
+        if(inst909Idx >= (sizeof(inst909List) / sizeof(inst909List[0])))
+        {
+            phase = PH_SCAN_505;
+            inst505Idx = 0;
+            nextMs = nowMs + kPausePhaseMs;
+        }
+
+        return;
+    }
+
+    if(phase == PH_SCAN_505)
+    {
+        synth505.Trigger(inst505List[inst505Idx], 0.88f);
+        inst505Idx++;
+        nextMs = nowMs + kPauseSynthMs;
+        if(inst505Idx >= (sizeof(inst505List) / sizeof(inst505List[0])))
+        {
+            phase = PH_SCAN_303_ON;
+            note303Idx = 0;
+            nextMs = nowMs + kPausePhaseMs;
+        }
+
+        return;
+    }
+
+    if(phase == PH_SCAN_303_ON)
+    {
+        if(note303Idx >= (sizeof(notes303) / sizeof(notes303[0])))
+        {
+            acid303.NoteOff();
+            phase = PH_DONE;
+            return;
+        }
+
+        bool accent = ((note303Idx & 1u) == 0u);
+        bool slide  = ((note303Idx & 3u) == 3u);
+        acid303.NoteOn(notes303[note303Idx], accent, slide);
+        phase  = PH_SCAN_303_OFF;
+        nextMs = nowMs + kPause303OnMs;
+        return;
+    }
+
+    if(phase == PH_SCAN_303_OFF)
+    {
+        acid303.NoteOff();
+        note303Idx++;
+        phase  = PH_SCAN_303_ON;
+        nextMs = nowMs + kPause303OffMs;
+
+        return;
+    }
 }
 
 static float MySoftClip(float x){
@@ -1473,11 +1706,11 @@ static void ProcessCommand()
     case CMD_TRIGGER_LIVE:
         if(len >= 2){
             uint8_t pad = p[0];
+            uint8_t vel = p[1];
             if(kAcceptOneBasedPadIndex && pad > 0) pad -= 1;
-            TriggerPad(pad, p[1]);
+            TriggerPad(pad, vel);
             spiLastTriggerMs = hw.system.GetNow();
-            if(kTriggerSynthOnLiveCmd)
-                synth808.Trigger(TR808::INST_KICK, clampF(p[1] / 127.0f, 0.0f, 1.0f));
+            Synth808TriggerByPad(pad, clampF(vel / 127.0f, 0.0f, 1.0f));
         }
         break;
 
@@ -1488,8 +1721,8 @@ static void ProcessCommand()
             uint32_t maxS = 0; memcpy(&maxS, p + 4, 4);
             TriggerPad(pad, p[1], p[2], (int8_t)p[3], maxS);
             spiLastTriggerMs = hw.system.GetNow();
-            if(kTriggerSynthOnLiveCmd)
-                synth808.Trigger(TR808::INST_KICK, clampF(p[1] / 127.0f, 0.0f, 1.0f));
+            /* Disparar instrumento 808 mapeado al pad */
+            Synth808TriggerByPad(pad, clampF(p[1] / 127.0f, 0.0f, 1.0f));
         }
         break;
 
@@ -2602,9 +2835,9 @@ static void UartRxByteCb(void* ctx, UartHandler::Result res)
             SPIPacketHeader* hdr = (SPIPacketHeader*)rxBuf;
             uartLedPulseUntilMs = now + 120;
 
-            /* MVP: kick inmediato en CMD_TRIGGER_LIVE */
+            /* Solo marcar actividad UART. El disparo real se hace al
+             * parsear payload válido en ProcessCommand(). */
             if(hdr->cmd == CMD_TRIGGER_LIVE && (now - uartMvpLastKickMs) > 30){
-                synth808.Trigger(TR808::INST_KICK, 0.80f);
                 uartMvpLastKickMs = now;
                 spiLastTriggerMs  = now;
             }
@@ -3116,14 +3349,100 @@ int main()
     if(kEnableInitFx)
         InitFX();
 
-    /* ── SD Card DESHABILITADA temporalmente ── */
-    // hw.PrintLine("Montando SD card (SPI3: D0=CS D2=SCK D1=MISO D6=MOSI)...");
-    // bool sdOk = InitSD();
-    // hw.PrintLine(sdOk ? "SD OK (SPI mode)" : "SD no encontrada");
-    // if(sdOk) AutoLoadFromSD();
+    /* ── Cargar WAVs desde QSPI Flash (blob en 0x90080000) → SDRAM ── */
+    {
+        /* El blob se flashea con pack_wavs.py + dfu-util a 0x90080000.
+         * Formato: magic "WAV\0"(4B) | ver(2B) | count(2B)
+         *          entries[count]: padIdx(1B) | rsv(1B) | offset(4B) | size(4B)  [10 bytes]
+         *          WAV files raw (con header) back-to-back, align 4
+         * La QSPI es memory-mapped: leemos directamente como punteros. */
+        static const uint8_t* QSPI_SAMPLES = (const uint8_t*)0x90080000;
+        static const uint32_t QSPI_END_ADDR = 0x90800000;
+        const uint8_t* blob = QSPI_SAMPLES;
+        bool blobOk = (blob[0]=='W' && blob[1]=='A' && blob[2]=='V' && blob[3]==0);
+        if(blobOk){
+            uint16_t blobCount = blob[6] | (blob[7] << 8);
+            const uint32_t maxBlobBytes = QSPI_END_ADDR - (uint32_t)QSPI_SAMPLES;
+            const uint32_t entrySize = 10;
+            Log("QSPI WAV blob detectado: %d samples", blobCount);
+            for(uint16_t i = 0; i < blobCount && i < MAX_PADS; i++){
+                const uint8_t* e = blob + 8 + i * entrySize;
+                uint8_t  padIdx  = e[0];
+                uint32_t offset  = e[2]|(e[3]<<8)|(e[4]<<16)|(e[5]<<24);
+                uint32_t fsize   = e[6]|(e[7]<<8)|(e[8]<<16)|(e[9]<<24);
+                if(padIdx >= MAX_PADS || fsize < 44) continue;
+                if(offset >= maxBlobBytes || fsize > maxBlobBytes || (offset + fsize) > maxBlobBytes)
+                    continue;
+                /* Parsear WAV header directamente desde QSPI */
+                const uint8_t* wav = blob + offset;
+                if(memcmp(wav, "RIFF", 4) != 0 || memcmp(wav+8, "WAVE", 4) != 0){
+                    Log("  Pad %d: WAV header invalido", padIdx);
+                    continue;
+                }
+                uint16_t ch  = wav[22] | (wav[23]<<8);
+                uint16_t bps = wav[34] | (wav[35]<<8);
+                /* Buscar chunk "data" */
+                uint32_t pos = 12;
+                uint32_t dataSize = 0;
+                const uint8_t* dataPtr = nullptr;
+                while((pos + 8) <= fsize){
+                    const uint8_t* ck = wav + pos;
+                    uint32_t ckSz = ck[4]|(ck[5]<<8)|(ck[6]<<16)|(ck[7]<<24);
+                    if((pos + 8 + ckSz) > fsize)
+                        break;
+                    if(memcmp(ck, "data", 4) == 0){
+                        dataSize = ckSz;
+                        dataPtr  = ck + 8;
+                        break;
+                    }
+                    pos += 8 + ckSz;
+                    if(ckSz & 1) pos++;  /* WAV chunks padded to even */
+                }
+                if(!dataPtr || dataSize == 0) continue;
+                uint32_t bytesPerFrame = (bps / 8) * ch;
+                if(bytesPerFrame == 0) continue;
+                uint32_t totalFrames = dataSize / bytesPerFrame;
+                if(totalFrames > MAX_SAMPLE_BYTES / 2)
+                    totalFrames = MAX_SAMPLE_BYTES / 2;
+                /* Convertir a mono 16-bit en SDRAM */
+                if(bps == 16 && ch == 1){
+                    memcpy(sampleStorage[padIdx], dataPtr, totalFrames * 2);
+                    sampleLength[padIdx] = totalFrames;
+                } else {
+                    uint32_t frames = 0;
+                    for(uint32_t f = 0; f < totalFrames; f++){
+                        const uint8_t* s = dataPtr + f * bytesPerFrame;
+                        int32_t sample = 0;
+                        if(bps == 16){
+                            sample = (int16_t)(s[0]|(s[1]<<8));
+                            if(ch == 2) sample = (sample + (int16_t)(s[2]|(s[3]<<8))) / 2;
+                        } else if(bps == 24){
+                            sample = (int32_t)(((uint32_t)s[0]<<8)|((uint32_t)s[1]<<16)|((uint32_t)s[2]<<24));
+                            sample >>= 16;
+                            if(ch == 2){
+                                int32_t s2 = (int32_t)(((uint32_t)s[3]<<8)|((uint32_t)s[4]<<16)|((uint32_t)s[5]<<24));
+                                sample = (sample + (s2>>16)) / 2;
+                            }
+                        } else if(bps == 8){
+                            sample = ((int32_t)s[0] - 128) * 256;
+                            if(ch == 2) sample = (sample + ((int32_t)s[1]-128)*256) / 2;
+                        }
+                        sampleStorage[padIdx][frames++] =
+                            (int16_t)(sample < -32768 ? -32768 : (sample > 32767 ? 32767 : sample));
+                    }
+                    sampleLength[padIdx] = frames;
+                }
+                sampleTotalSamples[padIdx] = sampleLength[padIdx];
+                sampleLoaded[padIdx] = (sampleLength[padIdx] > 0);
+                if(sampleLoaded[padIdx])
+                    Log("  Pad %2d: %lu frames OK", padIdx, sampleLength[padIdx]);
+            }
+        } else {
+            Log("No hay WAV blob en QSPI (0x90080000)");
+        }
+    }
     bool sdOk = false;
     sdPresent = false;
-    Log("SD card: DESHABILITADA (sin hardware)");
 
     /* ── Conteo de samples cargados ── */
     uint8_t loadedCount = 0;
@@ -3132,12 +3451,12 @@ int main()
 
     if(kEnableSpiSlave)
     {
-        /* ── UART1 (comunicación con ESP32-S3, TEST) — D29=TX(PB14) D30=RX(PB15) 115200 8N1 ── */
-        Log("Iniciando UART1 (115200 8N1)...");
+        /* ── UART1 (comunicación con ESP32-S3, TEST) — D29=TX(PB14) D30=RX(PB15) 230400 8N1 ── */
+        Log("Iniciando UART1 (230400 8N1)...");
         UartHandler::Config uart_config;
         uart_config.periph        = UartHandler::Config::Peripheral::USART_1;
         uart_config.mode          = UartHandler::Config::Mode::TX_RX;
-        uart_config.baudrate      = 115200;
+        uart_config.baudrate      = 230400;
         uart_config.stopbits      = UartHandler::Config::StopBits::BITS_1;
         uart_config.parity        = UartHandler::Config::Parity::NONE;
         uart_config.wordlength    = UartHandler::Config::WordLength::BITS_8;
@@ -3168,6 +3487,7 @@ int main()
     Log(">>> RED808 DRUM MACHINE READY <<<");
 
     Log("STARTUP TONE TEST: tono 1kHz durante 3s (kStartupToneTest=true)");
+    Log("STARTUP SELF-TEST: WAV + 808 + 909 + 505 + 303 (con pausas)");
 
     /* ── Main loop ── */
     while(1){
@@ -3184,6 +3504,7 @@ int main()
          * Pulso: llegó header con magic válido y longitud coherente
          */
         uint32_t now = hw.system.GetNow();
+        RunStartup808SelfTest(now);
         hw.SetLed(now < uartLedPulseUntilMs);
     }
 }

@@ -3,6 +3,7 @@ $root   = 'C:\Users\cesco\Documents\smt32config\DaisySeed'
 $dfu    = 'C:\Espressif\tools\dfu-util\0.11\dfu-util-0.11-win64\dfu-util.exe'
 $boot   = 'C:\Users\cesco\Documents\smt32config\DaisySeed\libdaisy\core\dsy_bootloader_v6_4-intdfu-2000ms.bin'
 $fw     = 'C:\Users\cesco\Documents\smt32config\DaisySeed\build\DrumMachine.bin'
+$wavblob= 'C:\Users\cesco\Documents\smt32config\DaisySeed\build\samples.bin'
 $gccBin = 'C:\ST\STM32CubeIDE_2.0.0\STM32CubeIDE\plugins\com.st.stm32cube.ide.mcu.externaltools.gnu-tools-for-stm32.13.3.rel1.win32_1.0.100.202509120712\tools\bin'
 $makeBin= 'C:\ST\STM32CubeIDE_2.0.0\STM32CubeIDE\plugins\com.st.stm32cube.ide.mcu.externaltools.make.win32_2.2.0.202409170845\tools\bin'
 $log    = 'C:\Users\cesco\Documents\smt32config\flash_daisy_script_log.txt'
@@ -58,15 +59,33 @@ if(-not $found2) {
     exit 3
 }
 
-Write-Host 'Flasheando firmware app (QSPI)...' -ForegroundColor Cyan
-$resApp = & $dfu -a 0 -s 0x90040000:leave -D $fw -d ",0483:df11" 2>&1 | Tee-Object -FilePath $log -Append | Out-String
+Write-Host 'Flasheando firmware app (QSPI @ 0x90040000)...' -ForegroundColor Cyan
+$resApp = & $dfu -a 0 -s 0x90040000 -D $fw -d ",0483:df11" 2>&1 | Tee-Object -FilePath $log -Append | Out-String
 
-if($resApp -match 'Download done') {
-    'RESULT=FLASH_OK' | Tee-Object -FilePath $log -Append
-    Write-Host 'FLASH_OK' -ForegroundColor Green
-    exit 0
-} else {
+if($resApp -notmatch 'Download done') {
     'RESULT=FLASH_FAIL' | Tee-Object -FilePath $log -Append
-    Write-Host 'FLASH_FAIL' -ForegroundColor Red
+    Write-Host 'FLASH_FAIL (firmware)' -ForegroundColor Red
     exit 4
 }
+Write-Host 'Firmware OK' -ForegroundColor Green
+
+# ── Flashear WAV samples blob (QSPI @ 0x90080000) ──
+if(Test-Path $wavblob) {
+    $blobSizeKB = [math]::Round((Get-Item $wavblob).Length / 1KB, 1)
+    Write-Host "Flasheando WAV samples ($blobSizeKB KB) a QSPI @ 0x90080000..." -ForegroundColor Cyan
+    $resWav = & $dfu -a 0 -s 0x90080000:leave -D $wavblob -d ",0483:df11" 2>&1 | Tee-Object -FilePath $log -Append | Out-String
+    if($resWav -match 'Download done') {
+        "RESULT=SAMPLES_FLASH_OK ($blobSizeKB KB)" | Tee-Object -FilePath $log -Append
+        Write-Host "WAV samples OK ($blobSizeKB KB)" -ForegroundColor Green
+    } else {
+        'RESULT=SAMPLES_FLASH_FAIL' | Tee-Object -FilePath $log -Append
+        Write-Host 'WARNING: Fallo al flashear WAV samples' -ForegroundColor Yellow
+    }
+} else {
+    Write-Host 'No se encontro build/samples.bin - sin WAV samples' -ForegroundColor Yellow
+    'RESULT=NO_SAMPLES_BLOB' | Tee-Object -FilePath $log -Append
+}
+
+'RESULT=FLASH_OK' | Tee-Object -FilePath $log -Append
+Write-Host 'FLASH_OK' -ForegroundColor Green
+exit 0
