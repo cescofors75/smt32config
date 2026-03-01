@@ -14,7 +14,7 @@
  *  Verificado contra: DAISY_SLAVE_GUIDE.md (ESP32-S3 v1.0)
  *
  *  PINOUT REAL (verificado en daisy_seed.h):
- *  UART1 (Master comm - TEST): D29=PB14/TX  D30=PB15/RX  (115200 8N1)
+ *  UART1 (Master comm - TEST): D29=PB14/TX  D30=PB15/RX  (230400 8N1)
  *    ESP32 TX → Daisy D30   |   ESP32 RX → Daisy D29
  *  SPI3 (SD card, MASTER):  D0=PB12/CS(GPIO)  D2=PC10/SCK
  *                            D1=PC11/MISO      D6=PC12/MOSI
@@ -50,6 +50,7 @@ UartHandler uart_slave;
  * ═══════════════════════════════════════════════════════════════════ */
 #define SR                 48000
 #define AUDIO_BLOCK        128
+#define DAISY_UART_BAUD    230400
 #define MAX_PADS           24
 #define MAX_VOICES         32
 #define MAX_SAMPLE_BYTES   (96000 * 2)   /* ~2.0 s per pad @ 48000  */
@@ -76,6 +77,7 @@ UartHandler uart_slave;
 #define CMD_LIVE_VOLUME       0x12
 #define CMD_TRACK_VOLUME      0x13
 #define CMD_LIVE_PITCH        0x14
+#define CMD_TEMPO             0x15
 
 /* Global Filter */
 #define CMD_FILTER_SET        0x20
@@ -352,6 +354,10 @@ struct Voice {
     float    speed;
     float    gainL;
     float    gainR;
+    float    env;
+    float    envAttackInc;
+    float    envDecayCoef;
+    uint8_t  envStage; /* 0=attack,1=decay,2=bypass */
     uint32_t age;
 };
 static Voice   voices[MAX_VOICES];
@@ -363,6 +369,7 @@ static uint32_t voiceAge = 0;
 static float masterGain  = 1.0f;
 static float seqVolume   = 1.0f;
 static float liveVolume  = 1.0f;
+static float transportBpm = 120.0f;
 static float livePitch   = 1.0f;
 static float trackGain[MAX_PADS];
 
@@ -613,6 +620,22 @@ static BiquadEQ trkEqHigh[MAX_PADS];
 static int8_t trkEqLowDb[MAX_PADS];
 static int8_t trkEqMidDb[MAX_PADS];
 static int8_t trkEqHighDb[MAX_PADS];
+
+/* Per-track LFO (interno DSP, configurable desde host) */
+enum TrackLfoWave : uint8_t { LFO_WAVE_SINE = 0, LFO_WAVE_TRI = 1, LFO_WAVE_SH = 2 };
+enum TrackLfoTarget : uint8_t { LFO_TGT_GAIN = 0, LFO_TGT_PAN = 1, LFO_TGT_FILTER = 2 };
+static bool    trkLfoActive[MAX_PADS];
+static uint8_t trkLfoWave[MAX_PADS];
+static uint8_t trkLfoTarget[MAX_PADS];
+static float   trkLfoRate[MAX_PADS];
+static float   trkLfoDepth[MAX_PADS];
+static float   trkLfoPhase[MAX_PADS];
+static float   trkLfoSH[MAX_PADS];
+
+/* Per-track AD envelope (aplicada por voz sampler) */
+static bool    trkEnvAdActive[MAX_PADS];
+static float   trkEnvAttackMs[MAX_PADS];
+static float   trkEnvDecayMs[MAX_PADS];
 
 /* ═══════════════════════════════════════════════════════════════════
  *  15. SIDECHAIN
@@ -947,6 +970,51 @@ static const uint8_t padTo808[16] = {
     TR808::INST_LOW_CONGA, /* pad 15 = LC  → INST_LOW_CONGA (8) */
 };
 
+static const uint8_t padTo909[16] = {
+    TR909::INST_KICK,      /* 0 BD */
+    TR909::INST_SNARE,     /* 1 SD */
+    TR909::INST_HIHAT_C,   /* 2 CH */
+    TR909::INST_HIHAT_O,   /* 3 OH */
+    TR909::INST_CRASH,     /* 4 CY */
+    TR909::INST_CLAP,      /* 5 CP */
+    TR909::INST_RIMSHOT,   /* 6 RS */
+    TR909::INST_RIDE,      /* 7 CB surrogate */
+    TR909::INST_LOW_TOM,   /* 8 LT */
+    TR909::INST_MID_TOM,   /* 9 MT */
+    TR909::INST_HI_TOM,    /* 10 HT */
+    TR909::INST_CLAP,      /* 11 MA surrogate */
+    TR909::INST_RIMSHOT,   /* 12 CL surrogate */
+    TR909::INST_LOW_TOM,   /* 13 HC surrogate */
+    TR909::INST_MID_TOM,   /* 14 MC surrogate */
+    TR909::INST_HI_TOM,    /* 15 LC surrogate */
+};
+
+static const uint8_t padTo505[16] = {
+    TR505::INST_KICK,      /* 0 BD */
+    TR505::INST_SNARE,     /* 1 SD */
+    TR505::INST_HIHAT_C,   /* 2 CH */
+    TR505::INST_HIHAT_O,   /* 3 OH */
+    TR505::INST_CYMBAL,    /* 4 CY */
+    TR505::INST_CLAP,      /* 5 CP */
+    TR505::INST_RIMSHOT,   /* 6 RS */
+    TR505::INST_COWBELL,   /* 7 CB */
+    TR505::INST_LOW_TOM,   /* 8 LT */
+    TR505::INST_MID_TOM,   /* 9 MT */
+    TR505::INST_HI_TOM,    /* 10 HT */
+    TR505::INST_COWBELL,   /* 11 MA surrogate */
+    TR505::INST_CLAP,      /* 12 CL surrogate */
+    TR505::INST_LOW_TOM,   /* 13 HC surrogate */
+    TR505::INST_MID_TOM,   /* 14 MC surrogate */
+    TR505::INST_HI_TOM,    /* 15 LC surrogate */
+};
+
+static const uint8_t padTo303Midi[16] = {
+    36, 38, 41, 43,
+    45, 48, 50, 53,
+    55, 57, 60, 62,
+    64, 67, 69, 72
+};
+
 static inline void Synth808TriggerByPad(uint8_t padIdx, float velocity)
 {
     if(padIdx < 16)
@@ -968,11 +1036,11 @@ static constexpr bool kEnableAudioStart = true; /* iniciar audio normal */
 static constexpr bool kEnableStartLog = false; /* diagnóstico: aislar StartLog/USB */
 static constexpr bool kEnableInitFx = true;    /* diagnóstico: reactivar InitFX para aislar causa */
 static constexpr bool kStartupToneTest = false; /* tono confirmado OK, desactivado */
-static constexpr bool kStartup808SelfTest = true; /* autotest al arranque: 16 instrumentos + mini tema 5s */
-static constexpr bool kBypassIncomingCrc = true; /* diagnóstico enlace UART: no bloquear por mismatch de CRC */
+static constexpr bool kStartup808SelfTest = false; /* desactivado: arranque limpio, espera comandos del master */
+static constexpr bool kBypassIncomingCrc = false; /* producción: validar CRC de comandos entrantes */
 static constexpr bool kAcceptOneBasedPadIndex = false; /* ESP32 envía 0-based (pad 0=BD, 1=SD, etc.) */
-static constexpr bool kTriggerSynthOnLiveCmd = true; /* diagnóstico: confirmar llegada de TRIGGER por SPI */
-static constexpr bool kForceMasterGainDebug = true; /* diagnóstico: ignorar mute/volumen master desde host */
+static constexpr bool kTriggerSynthOnLiveCmd = false; /* producción: no superponer synth al disparo de sampler */
+static constexpr bool kForceMasterGainDebug = false; /* producción: respetar master volume del host */
 static constexpr bool kSpiSingleFrame10 = true; /* compat: master envía trigger en 1 frame de 10 bytes */
 static bool demoModeActive = false; /* demo desactivada — audio codec y jack ya verificados */
 
@@ -986,6 +1054,55 @@ static uint32_t FastRand(){
 }
 static float RandFloat(){
     return ((float)(int32_t)FastRand()) / 2147483648.0f;
+}
+
+/* ── Startup section announcer (retro-robótico por formantes) ── */
+enum StartupSectionTag : uint8_t {
+    SEC_SAMPLERS = 0,
+    SEC_808,
+    SEC_909,
+    SEC_505,
+    SEC_303,
+    SEC_XTRAS,
+    SEC_SAMPLER_FX,
+    SEC_TECHNO,
+    SEC_ELECTRO,
+    SEC_AMBIENT,
+    SEC_COUNT
+};
+
+static FormantOscillator startupAnnounceOsc;
+static bool             startupAnnounceActive = false;
+static float            startupAnnounceEnv    = 0.0f;
+static uint32_t         startupAnnounceRemain = 0;
+
+static void QueueStartupSectionTag(StartupSectionTag sec)
+{
+    static const char* kWords[SEC_COUNT] = {
+        "SAMPLERS", "808", "909", "505", "303", "XTRAS", "FX JAM", "TECHNO", "ELECTRO", "AMBIENT"
+    };
+    static const float kCarrier[SEC_COUNT] = {
+        86.0f, 92.0f, 98.0f, 104.0f, 110.0f, 116.0f, 94.0f, 88.0f, 96.0f, 80.0f
+    };
+    static const float kFormant[SEC_COUNT] = {
+        820.0f, 940.0f, 980.0f, 910.0f, 860.0f, 760.0f, 1030.0f, 700.0f, 1080.0f, 640.0f
+    };
+    static const float kPhaseShift[SEC_COUNT] = {
+        0.28f, 0.32f, 0.38f, 0.45f, 0.52f, 0.62f, 0.34f, 0.58f, 0.42f, 0.66f
+    };
+
+    uint8_t idx = (uint8_t)sec;
+    if(idx >= SEC_COUNT) return;
+
+    startupAnnounceOsc.SetCarrierFreq(kCarrier[idx]);
+    startupAnnounceOsc.SetFormantFreq(kFormant[idx]);
+    startupAnnounceOsc.SetPhaseShift(kPhaseShift[idx]);
+    startupAnnounceEnv    = 1.0f;
+    startupAnnounceRemain = (uint32_t)(SR * 0.22f);
+    startupAnnounceActive = true;
+
+    /* Etiqueta textual de sección (si el log USB está activo) */
+    hw.PrintLine(">>> %s <<<", kWords[idx]);
 }
 
 /* ═══════════════════════════════════════════════════════════════════
@@ -1008,6 +1125,19 @@ static inline float clampF(float v, float lo, float hi){
     return v < lo ? lo : (v > hi ? hi : v);
 }
 
+static inline float TriFromPhase(float ph)
+{
+    /* 0..1 -> -1..+1 */
+    float t = ph < 0.5f ? (ph * 2.0f) : (2.0f - ph * 2.0f);
+    return t * 2.0f - 1.0f;
+}
+
+static inline float AdDecayCoefFromMs(float decayMs)
+{
+    float samples = clampF(decayMs, 1.0f, 8000.0f) * (float)SR * 0.001f;
+    return expf(-1.0f / samples);
+}
+
 /* Forward decl: usado por el startup self-test */
 static void TriggerPad(uint8_t pad, uint8_t velocity,
                        uint8_t trkVol, int8_t pan,
@@ -1015,11 +1145,12 @@ static void TriggerPad(uint8_t pad, uint8_t velocity,
 
 /* ═══════════════════════════════════════════════════════════════════
  *  Startup self-test en fases
- *  1) Samplers WAV cargados (pad por pad)
+ *  1) Samplers WAV RED (pads 0..15, pad por pad)
  *  2) TR808 instrumentos (uno a uno)
  *  3) TR909 instrumentos (uno a uno)
  *  4) TR505 instrumentos (uno a uno)
  *  5) TB303 notas (una a una)
+ *  6) Samplers WAV XTRA (pads 16..23, al final)
  * ═══════════════════════════════════════════════════════════════════ */
 static void RunStartup808SelfTest(uint32_t nowMs)
 {
@@ -1034,21 +1165,33 @@ static void RunStartup808SelfTest(uint32_t nowMs)
         PH_SCAN_505,
         PH_SCAN_303_ON,
         PH_SCAN_303_OFF,
+        PH_SCAN_XTRA,
+        PH_SAMPLER_FX_JAM,
+        PH_SYNTH_JAM,
+        PH_CLEANUP,
         PH_DONE
     };
     static Phase    phase = PH_IDLE;
     static uint32_t nextMs = 0;
     static uint8_t  padIdx = 0;
+    static uint8_t  xtraPadIdx = 16;
     static uint8_t  inst808Idx = 0;
     static uint8_t  inst909Idx = 0;
     static uint8_t  inst505Idx = 0;
     static uint8_t  note303Idx = 0;
+    static uint8_t  samplerFxStep = 0;
+    static uint8_t  synthJamStep  = 0;
+    static uint8_t  synthJamStyle = 0; /* 0=Techno 1=Electro 2=Ambient */
 
     static const uint32_t kPauseSampleMs = 380;
     static const uint32_t kPauseSynthMs  = 360;
     static const uint32_t kPausePhaseMs  = 560;
     static const uint32_t kPause303OnMs  = 320;
     static const uint32_t kPause303OffMs = 220;
+    static const uint32_t kPauseSamplerFxMs = 230;
+    static const uint32_t kPauseSynthJamMs  = 130;
+    static const uint8_t  kSamplerFxSteps   = 14;
+    static const uint8_t  kSynthJamSteps    = 32;
 
     static const uint8_t inst808List[16] = {
         TR808::INST_KICK,
@@ -1101,15 +1244,48 @@ static void RunStartup808SelfTest(uint32_t nowMs)
         36, 38, 41, 43, 45, 48, 50, 53
     };
 
+    static const uint8_t jamNotes[16] = {
+        36, 36, 43, 0,
+        41, 41, 48, 0,
+        45, 45, 50, 48,
+        43, 41, 38, 0
+    };
+
+    static const uint8_t jamNotesElectro[16] = {
+        36, 43, 36, 0,
+        48, 46, 43, 0,
+        41, 43, 45, 0,
+        50, 48, 46, 43
+    };
+
+    static const uint8_t jamNotesAmbient[16] = {
+        36, 0, 43, 0,
+        48, 0, 50, 0,
+        53, 0, 48, 0,
+        45, 0, 41, 0
+    };
+
+    if(spiPktCnt > 0 && phase != PH_DONE)
+    {
+        acid303.NoteOff();
+        phase = PH_DONE;
+        return;
+    }
+
     if(phase == PH_IDLE)
     {
         phase   = PH_SCAN_SAMPLES;
         nextMs  = nowMs + 250;
         padIdx  = 0;
+        xtraPadIdx = 16;
         inst808Idx = 0;
         inst909Idx = 0;
         inst505Idx = 0;
         note303Idx = 0;
+        samplerFxStep = 0;
+        synthJamStep = 0;
+        synthJamStyle = 0;
+        QueueStartupSectionTag(SEC_SAMPLERS);
         return;
     }
 
@@ -1118,10 +1294,10 @@ static void RunStartup808SelfTest(uint32_t nowMs)
 
     if(phase == PH_SCAN_SAMPLES)
     {
-        while(padIdx < MAX_PADS && !sampleLoaded[padIdx])
+        while(padIdx < 16 && !sampleLoaded[padIdx])
             padIdx++;
 
-        if(padIdx < MAX_PADS)
+        if(padIdx < 16)
         {
             TriggerPad(padIdx, 115, 100, 0, 0);
             padIdx++;
@@ -1132,6 +1308,7 @@ static void RunStartup808SelfTest(uint32_t nowMs)
         phase = PH_SCAN_808;
         inst808Idx = 0;
         nextMs = nowMs + kPausePhaseMs;
+        QueueStartupSectionTag(SEC_808);
         return;
     }
 
@@ -1145,6 +1322,7 @@ static void RunStartup808SelfTest(uint32_t nowMs)
             phase = PH_SCAN_909;
             inst909Idx = 0;
             nextMs = nowMs + kPausePhaseMs;
+            QueueStartupSectionTag(SEC_909);
         }
 
         return;
@@ -1160,6 +1338,7 @@ static void RunStartup808SelfTest(uint32_t nowMs)
             phase = PH_SCAN_505;
             inst505Idx = 0;
             nextMs = nowMs + kPausePhaseMs;
+            QueueStartupSectionTag(SEC_505);
         }
 
         return;
@@ -1175,6 +1354,7 @@ static void RunStartup808SelfTest(uint32_t nowMs)
             phase = PH_SCAN_303_ON;
             note303Idx = 0;
             nextMs = nowMs + kPausePhaseMs;
+            QueueStartupSectionTag(SEC_303);
         }
 
         return;
@@ -1185,7 +1365,10 @@ static void RunStartup808SelfTest(uint32_t nowMs)
         if(note303Idx >= (sizeof(notes303) / sizeof(notes303[0])))
         {
             acid303.NoteOff();
-            phase = PH_DONE;
+            phase = PH_SCAN_XTRA;
+            xtraPadIdx = 16;
+            nextMs = nowMs + kPausePhaseMs;
+            QueueStartupSectionTag(SEC_XTRAS);
             return;
         }
 
@@ -1204,6 +1387,250 @@ static void RunStartup808SelfTest(uint32_t nowMs)
         phase  = PH_SCAN_303_ON;
         nextMs = nowMs + kPause303OffMs;
 
+        return;
+    }
+
+    if(phase == PH_SCAN_XTRA)
+    {
+        while(xtraPadIdx < MAX_PADS && !sampleLoaded[xtraPadIdx])
+            xtraPadIdx++;
+
+        if(xtraPadIdx < MAX_PADS)
+        {
+            TriggerPad(xtraPadIdx, 115, 100, 0, 0);
+            xtraPadIdx++;
+            nextMs = nowMs + kPauseSampleMs;
+            return;
+        }
+
+        phase = PH_SAMPLER_FX_JAM;
+        samplerFxStep = 0;
+        nextMs = nowMs + kPausePhaseMs;
+        QueueStartupSectionTag(SEC_SAMPLER_FX);
+        return;
+    }
+
+    if(phase == PH_SAMPLER_FX_JAM)
+    {
+        delayActive = true;
+        reverbActive = true;
+        chorusActive = true;
+        delayMix = 0.20f;
+        delayFeedback = 0.34f;
+        reverbMix = 0.24f;
+        chorusMix = 0.16f;
+        masterDelay.SetDelay(0.18f * (float)SR);
+        masterReverb.SetFeedback(0.83f);
+        masterReverb.SetLpFreq(7600.0f);
+        masterChorus.SetLfoFreq(0.35f);
+        masterChorus.SetLfoDepth(0.35f);
+
+        int picked = -1;
+        for(int k = 0; k < MAX_PADS; k++){
+            int cand = (samplerFxStep + k) % MAX_PADS;
+            if(sampleLoaded[cand]){ picked = cand; break; }
+        }
+
+        if(picked < 0)
+        {
+            phase = PH_SYNTH_JAM;
+            synthJamStyle = 0;
+            synthJamStep = 0;
+            nextMs = nowMs + kPausePhaseMs;
+            QueueStartupSectionTag(SEC_TECHNO);
+            return;
+        }
+
+        float t = (kSamplerFxSteps <= 1)
+            ? 1.0f
+            : ((float)samplerFxStep / (float)(kSamplerFxSteps - 1));
+        float sweep = 0.5f + 0.5f * sinf(2.0f * (float)M_PI * (0.8f * t + 0.12f));
+
+        uint8_t p = (uint8_t)picked;
+        trkEnvAdActive[p] = true;
+        trkEnvAttackMs[p] = 1.0f + 45.0f * sweep;
+        trkEnvDecayMs[p]  = 140.0f + 980.0f * t;
+
+        trkFilterType[p] = ((samplerFxStep & 3u) == 2u) ? FTYPE_BANDPASS : FTYPE_LOWPASS;
+        trkFilterCut[p]  = clampF(260.0f + 11200.0f * sweep, 20.0f, 18000.0f);
+        trkFilterQ[p]    = 0.75f + 2.1f * (1.0f - sweep);
+        trkFilter[p].SetType(trkFilterType[p], trkFilterCut[p], trkFilterQ[p], (float)SR);
+
+        trkDistMode[p]   = (samplerFxStep & 1u) ? DMODE_TUBE : DMODE_SOFT;
+        trkDistDrive[p]  = clampF(0.10f + 0.60f * t, 0.0f, 1.0f);
+        trkBitDepth[p]   = (uint8_t)clampF(16.0f - 9.0f * t, 6.0f, 16.0f);
+
+        trackReverbSend[p] = 0.10f + 0.35f * t;
+        trackDelaySend[p]  = 0.12f + 0.40f * (1.0f - t);
+        trackChorusSend[p] = 0.10f + 0.20f * sweep;
+        trackPanF[p]       = clampF(-0.8f + 1.6f * t, -1.0f, 1.0f);
+
+        trkLfoActive[p] = true;
+        trkLfoWave[p]   = ((samplerFxStep & 1u) == 0u) ? LFO_WAVE_TRI : LFO_WAVE_SINE;
+        trkLfoTarget[p] = ((samplerFxStep & 3u) == 1u) ? LFO_TGT_PAN : LFO_TGT_FILTER;
+        trkLfoRate[p]   = 0.45f + 3.2f * t;
+        trkLfoDepth[p]  = 0.18f + 0.55f * (1.0f - t);
+
+        uint8_t vel = (uint8_t)clampF(96.0f + 31.0f * sweep, 1.0f, 127.0f);
+        TriggerPad(p, vel, 100, 0, 0);
+
+        samplerFxStep++;
+        nextMs = nowMs + kPauseSamplerFxMs;
+        if(samplerFxStep >= kSamplerFxSteps)
+        {
+            phase = PH_SYNTH_JAM;
+            synthJamStyle = 0;
+            synthJamStep = 0;
+            nextMs = nowMs + kPausePhaseMs;
+            QueueStartupSectionTag(SEC_TECHNO);
+        }
+        return;
+    }
+
+    if(phase == PH_SYNTH_JAM)
+    {
+        const bool isTechno  = (synthJamStyle == 0);
+        const bool isElectro = (synthJamStyle == 1);
+        const bool isAmbient = (synthJamStyle == 2);
+
+        const uint8_t styleSteps = isAmbient ? 24 : kSynthJamSteps;
+        const uint32_t jamPauseMs = isAmbient ? 190 : (isElectro ? 145 : kPauseSynthJamMs);
+
+        delayActive = true;
+        reverbActive = true;
+        chorusActive = true;
+        tremoloActive = true;
+        if(isTechno){
+            delayMix = 0.16f + 0.08f * (0.5f + 0.5f * sinf(0.35f * (float)synthJamStep));
+            reverbMix = 0.20f + 0.10f * (0.5f + 0.5f * sinf(0.20f * (float)synthJamStep + 1.2f));
+            chorusMix = 0.14f + 0.08f * (0.5f + 0.5f * sinf(0.27f * (float)synthJamStep + 0.4f));
+            masterTremolo.SetFreq(3.0f + 2.2f * (0.5f + 0.5f * sinf(0.17f * (float)synthJamStep)));
+            masterTremolo.SetDepth(0.10f + 0.16f * (0.5f + 0.5f * sinf(0.19f * (float)synthJamStep + 0.7f)));
+        } else if(isElectro){
+            delayMix = 0.22f;
+            reverbMix = 0.14f;
+            chorusMix = 0.22f;
+            masterTremolo.SetFreq(5.0f);
+            masterTremolo.SetDepth(0.11f);
+            flangerActive = true;
+            flangerRate   = 0.55f;
+            flangerDepth  = 0.48f;
+            flangerMix    = 0.22f;
+        } else {
+            delayMix = 0.12f;
+            reverbMix = 0.34f;
+            chorusMix = 0.30f;
+            masterTremolo.SetFreq(1.6f);
+            masterTremolo.SetDepth(0.07f);
+            flangerActive = false;
+            masterReverb.SetLpFreq(6200.0f);
+            masterReverb.SetFeedback(0.90f);
+        }
+
+        uint8_t st = synthJamStep & 15u;
+        if(isTechno){
+            if((st % 4u) == 0u) synth808.kick.Trigger(0.92f);
+            if(st == 4u || st == 12u) synth909.snare.Trigger(0.82f);
+            if((st % 2u) == 1u) synth505.hihatC.Trigger(0.48f);
+            if(st == 7u || st == 15u) synth505.clap.Trigger(0.64f);
+            if(st == 10u) synth909.ride.Trigger(0.52f);
+        } else if(isElectro){
+            if(st == 0u || st == 6u || st == 8u || st == 14u) synth909.kick.Trigger(0.90f);
+            if(st == 4u || st == 12u) synth505.snare.Trigger(0.72f);
+            if((st % 4u) == 2u) synth909.hihatO.Trigger(0.52f);
+            if((st % 2u) == 1u) synth505.hihatC.Trigger(0.40f);
+            if(st == 11u) synth505.cowbell.Trigger(0.58f);
+        } else {
+            if(st == 0u || st == 8u) synth808.kick.Trigger(0.66f);
+            if(st == 4u || st == 12u) synth808.clap.Trigger(0.48f);
+            if((st % 8u) == 6u) synth909.crash.Trigger(0.36f);
+            if((st % 4u) == 2u) synth505.hihatO.Trigger(0.34f);
+        }
+
+        float u = (styleSteps <= 1)
+            ? 1.0f
+            : ((float)synthJamStep / (float)(styleSteps - 1));
+
+        float acidCut = isTechno
+            ? (420.0f + 4400.0f * u + 900.0f * sinf(2.0f * (float)M_PI * (u * 1.5f)))
+            : (isElectro
+                ? (700.0f + 3600.0f * (0.5f + 0.5f * sinf(0.30f * (float)synthJamStep)))
+                : (260.0f + 2200.0f * (0.5f + 0.5f * sinf(0.18f * (float)synthJamStep))));
+        acidCut = clampF(acidCut,
+                               120.0f, 14000.0f);
+        acid303.SetCutoff(acidCut);
+        acid303.SetResonance(clampF(isAmbient
+            ? (0.35f + 0.22f * (0.5f + 0.5f * sinf(0.15f * (float)synthJamStep)))
+            : (0.45f + 0.40f * (0.5f + 0.5f * sinf(0.41f * (float)synthJamStep))), 0.1f, 0.94f));
+        acid303.SetEnvMod(clampF(isAmbient ? 0.30f : (0.38f + 0.55f * u), 0.0f, 1.0f));
+        acid303.SetDecay(clampF(isAmbient ? 0.42f : (0.16f + 0.20f * (1.0f - u)), 0.02f, 3.0f));
+        acid303.SetAccent(clampF(isAmbient
+            ? 0.32f
+            : (0.48f + 0.42f * (0.5f + 0.5f * sinf(0.23f * (float)synthJamStep + 0.3f))), 0.0f, 1.0f));
+        acid303.SetSlide(clampF(isAmbient ? 0.11f : (0.03f + 0.08f * (0.5f + 0.5f * sinf(0.29f * (float)synthJamStep))), 0.01f, 0.5f));
+        acid303.SetWaveform(isAmbient ? TB303::WAVE_SAW : ((synthJamStep & 8u) ? TB303::WAVE_SQUARE : TB303::WAVE_SAW));
+
+        uint8_t n = isTechno ? jamNotes[st] : (isElectro ? jamNotesElectro[st] : jamNotesAmbient[st]);
+        if(n == 0u)
+        {
+            acid303.NoteOff();
+        }
+        else
+        {
+            bool accent = isAmbient ? ((st % 8u) == 0u)
+                                    : (((st & 3u) == 0u) || (st == 6u) || (st == 14u));
+            bool slide  = isAmbient ? ((st % 8u) == 7u)
+                                    : (((st & 7u) == 3u) || (st == 11u));
+            acid303.NoteOn(n, accent, slide);
+        }
+
+        synthJamStep++;
+        nextMs = nowMs + jamPauseMs;
+        if(synthJamStep >= styleSteps)
+        {
+            acid303.NoteOff();
+            synthJamStep = 0;
+            synthJamStyle++;
+            if(synthJamStyle < 3){
+                nextMs = nowMs + kPausePhaseMs;
+                if(synthJamStyle == 1) QueueStartupSectionTag(SEC_ELECTRO);
+                else                   QueueStartupSectionTag(SEC_AMBIENT);
+            } else {
+                phase = PH_CLEANUP;
+                nextMs = nowMs + 20;
+            }
+        }
+        return;
+    }
+
+    if(phase == PH_CLEANUP)
+    {
+        delayActive = false;
+        reverbActive = false;
+        chorusActive = false;
+        tremoloActive = false;
+        flangerActive = false;
+
+        for(int i = 0; i < MAX_PADS; i++)
+        {
+            trkFilterType[i] = 0;
+            trkFilter[i].Reset();
+            trkDistDrive[i] = 0.0f;
+            trkDistMode[i]  = DMODE_SOFT;
+            trkBitDepth[i]  = 16;
+            trackReverbSend[i] = 0.0f;
+            trackDelaySend[i]  = 0.0f;
+            trackChorusSend[i] = 0.0f;
+            trackPanF[i]       = 0.0f;
+            trkLfoActive[i]    = false;
+            trkLfoDepth[i]     = 0.0f;
+            trkLfoPhase[i]     = 0.0f;
+            trkEnvAdActive[i]  = false;
+            trkEnvAttackMs[i]  = 1.0f;
+            trkEnvDecayMs[i]   = 250.0f;
+        }
+
+        phase = PH_DONE;
         return;
     }
 }
@@ -1277,6 +1704,20 @@ static void TriggerPad(uint8_t pad, uint8_t velocity,
     voices[slot].speed  = padPitch[pad];
     voices[slot].gainL  = gL;
     voices[slot].gainR  = gR;
+    if(trkEnvAdActive[pad]){
+        float atkMs = clampF(trkEnvAttackMs[pad], 0.0f, 2000.0f);
+        voices[slot].env = (atkMs <= 0.01f) ? 1.0f : 0.0f;
+        voices[slot].envAttackInc = (atkMs <= 0.01f)
+            ? 1.0f
+            : (1.0f / (atkMs * (float)SR * 0.001f));
+        voices[slot].envDecayCoef = AdDecayCoefFromMs(trkEnvDecayMs[pad]);
+        voices[slot].envStage = (atkMs <= 0.01f) ? 1 : 0;
+    } else {
+        voices[slot].env = 1.0f;
+        voices[slot].envAttackInc = 1.0f;
+        voices[slot].envDecayCoef = 1.0f;
+        voices[slot].envStage = 2;
+    }
     voices[slot].age    = voiceAge++;
 }
 
@@ -1323,6 +1764,31 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
         float reverbBusL = 0, delayBusL = 0, chorusBusL = 0;
         float sideSrc = 0;
 
+        float lfoVal[MAX_PADS];
+        uint8_t trkFilterLfoSet[MAX_PADS];
+        for(int t = 0; t < MAX_PADS; t++){
+            lfoVal[t] = 0.0f;
+            trkFilterLfoSet[t] = 0;
+            if(!trkLfoActive[t] || trkLfoDepth[t] <= 0.0001f) continue;
+
+            trkLfoPhase[t] += trkLfoRate[t] / (float)SR;
+            if(trkLfoPhase[t] >= 1.0f){
+                trkLfoPhase[t] -= 1.0f;
+                if(trkLfoWave[t] == LFO_WAVE_SH)
+                    trkLfoSH[t] = RandFloat(); /* -1..1 */
+            }
+
+            float v = 0.0f;
+            if(trkLfoWave[t] == LFO_WAVE_TRI)
+                v = TriFromPhase(trkLfoPhase[t]);
+            else if(trkLfoWave[t] == LFO_WAVE_SH)
+                v = trkLfoSH[t];
+            else
+                v = sinf(2.0f * (float)M_PI * trkLfoPhase[t]);
+
+            lfoVal[t] = v * trkLfoDepth[t];
+        }
+
         /* ── Render voices ── */
         for(int v = 0; v < MAX_VOICES; v++){
             Voice& vx = voices[v];
@@ -1351,6 +1817,22 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
             float s1   = (idx + 1 < sampleLength[p])
                          ? sampleStorage[p][idx + 1] / 32768.0f : 0.0f;
             float s    = s0 + frac * (s1 - s0);
+
+            /* ── Voice AD envelope ── */
+            if(vx.envStage == 0){
+                vx.env += vx.envAttackInc;
+                if(vx.env >= 1.0f){
+                    vx.env = 1.0f;
+                    vx.envStage = 1;
+                }
+            } else if(vx.envStage == 1){
+                vx.env *= vx.envDecayCoef;
+                if(vx.env < 0.0005f){
+                    vx.active = false;
+                    continue;
+                }
+            }
+            s *= vx.env;
 
             /* ── Stutter ── */
             if(padStutterOn[p]){
@@ -1417,6 +1899,12 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
 
             /* ── Per-track filter ── */
             if(trkFilterType[p]){
+                if(trkLfoActive[p] && trkLfoTarget[p] == LFO_TGT_FILTER && !trkFilterLfoSet[p]){
+                    float modCut = trkFilterCut[p] * (1.0f + 0.9f * lfoVal[p]);
+                    modCut = clampF(modCut, 20.f, 20000.f);
+                    trkFilter[p].SetType(trkFilterType[p], modCut, trkFilterQ[p], (float)SR);
+                    trkFilterLfoSet[p] = 1;
+                }
                 s = trkFilter[p].Process(s);
             }
 
@@ -1482,13 +1970,20 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
             if(anySolo && !trackSolo[p]) muted = true;
             if(muted) s = 0;
 
+            float lfoGain = 1.0f;
+            if(trkLfoActive[p] && trkLfoTarget[p] == LFO_TGT_GAIN)
+                lfoGain = clampF(1.0f + 0.8f * lfoVal[p], 0.0f, 2.0f);
+
             /* ── Apply voice gain → mix ── */
-            float outL = s * vx.gainL;
-            float outR = s * vx.gainR;
+            float outL = s * vx.gainL * lfoGain;
+            float outR = s * vx.gainR * lfoGain;
 
             /* ── Pan ── */
-            float panL = (1.0f - trackPanF[p]) * 0.5f;
-            float panR = (1.0f + trackPanF[p]) * 0.5f;
+            float panTrack = trackPanF[p];
+            if(trkLfoActive[p] && trkLfoTarget[p] == LFO_TGT_PAN)
+                panTrack = clampF(panTrack + 0.9f * lfoVal[p], -1.0f, 1.0f);
+            float panL = (1.0f - panTrack) * 0.5f;
+            float panR = (1.0f + panTrack) * 0.5f;
             busL += outL * panL;
             busR += outR * panR;
 
@@ -1532,6 +2027,18 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
         /* Añadir synths al bus (mono → ambos canales) */
         busL += synthMix;
         busR += synthMix;
+
+        /* ── Startup section cue (formante retro-robótico) ── */
+        if(startupAnnounceActive)
+        {
+            float cue = startupAnnounceOsc.Process() * startupAnnounceEnv * 0.16f;
+            busL += cue;
+            busR += cue;
+            startupAnnounceEnv *= 0.9994f;
+            if(startupAnnounceRemain > 0) startupAnnounceRemain--;
+            if(startupAnnounceRemain == 0 || startupAnnounceEnv < 0.005f)
+                startupAnnounceActive = false;
+        }
 
         /* ── MASTER FX CHAIN ── */
         float gainOut = kForceMasterGainDebug ? 1.0f : masterGain;
@@ -1667,6 +2174,9 @@ static void BuildResponse(uint8_t cmd, uint16_t seq,
 
 /* Forward declaration — definida more adelante en sección SD */
 static bool LoadWavToPad(const char* filepath, uint8_t padIdx);
+static int  GuessPadFromFilename(const char* fname);
+static bool isWavFile(const char* fname);
+static uint8_t FillMissingCanonicalPadsFromFamilies(uint8_t startPad, uint8_t maxPads);
 
 /* ═══════════════════════════════════════════════════════════════════
  *  23. PROCESS COMMAND  (ALL RED808 commands)
@@ -1710,7 +2220,8 @@ static void ProcessCommand()
             if(kAcceptOneBasedPadIndex && pad > 0) pad -= 1;
             TriggerPad(pad, vel);
             spiLastTriggerMs = hw.system.GetNow();
-            Synth808TriggerByPad(pad, clampF(vel / 127.0f, 0.0f, 1.0f));
+            if(kTriggerSynthOnLiveCmd)
+                Synth808TriggerByPad(pad, clampF(vel / 127.0f, 0.0f, 1.0f));
         }
         break;
 
@@ -1721,8 +2232,8 @@ static void ProcessCommand()
             uint32_t maxS = 0; memcpy(&maxS, p + 4, 4);
             TriggerPad(pad, p[1], p[2], (int8_t)p[3], maxS);
             spiLastTriggerMs = hw.system.GetNow();
-            /* Disparar instrumento 808 mapeado al pad */
-            Synth808TriggerByPad(pad, clampF(p[1] / 127.0f, 0.0f, 1.0f));
+            if(kTriggerSynthOnLiveCmd)
+                Synth808TriggerByPad(pad, clampF(p[1] / 127.0f, 0.0f, 1.0f));
         }
         break;
 
@@ -1760,6 +2271,12 @@ static void ProcessCommand()
         if(len >= 4){
             float pitch; memcpy(&pitch, p, 4);
             livePitch = clampF(pitch, 0.25f, 4.0f);
+        }
+        break;
+    case CMD_TEMPO:
+        if(len >= 4){
+            float bpm; memcpy(&bpm, p, 4);
+            transportBpm = clampF(bpm, 40.0f, 300.0f);
         }
         break;
 
@@ -2047,6 +2564,16 @@ static void ProcessCommand()
             trackChorusSend[t] = 0;
             trackPanF[t] = 0; trackMute[t] = false; trackSolo[t] = false;
             trkEqLowDb[t] = 0; trkEqMidDb[t] = 0; trkEqHighDb[t] = 0;
+            trkLfoActive[t] = false;
+            trkLfoWave[t]   = LFO_WAVE_SINE;
+            trkLfoTarget[t] = LFO_TGT_GAIN;
+            trkLfoRate[t]   = 1.0f;
+            trkLfoDepth[t]  = 0.0f;
+            trkLfoPhase[t]  = 0.0f;
+            trkLfoSH[t]     = 0.0f;
+            trkEnvAdActive[t] = false;
+            trkEnvAttackMs[t] = 1.0f;
+            trkEnvDecayMs[t]  = 250.0f;
             memset(trkEchoBuf[t], 0, sizeof(trkEchoBuf[t]));
             memset(trkFlgBuf[t],  0, sizeof(trkFlgBuf[t]));
         }
@@ -2105,12 +2632,58 @@ static void ProcessCommand()
         }
         break;
 
-    /* ── Track Phaser / Tremolo / Pitch / Gate (stubs — state stored) ── */
+    /* ── Track Phaser / Tremolo / Pitch / Gate ── */
     case CMD_TRACK_PHASER:
+        /* reservado para futuro (phaser per-track dedicado) */
+        break;
     case CMD_TRACK_TREMOLO:
+        /* LFO interno por track (Daisy soberana en modulación)
+         * Legacy payload (4B): [track, active, rateByte, depthByte]
+         * Extended payload (12B): [track,active,wave,target, rate(float), depth(float)] */
+        if(len >= 4 && p[0] < MAX_PADS){
+            uint8_t t = p[0];
+            trkLfoActive[t] = (p[1] != 0);
+
+            if(len >= 12){
+                trkLfoWave[t] = (p[2] > LFO_WAVE_SH) ? LFO_WAVE_SH : p[2];
+                trkLfoTarget[t] = (p[3] > LFO_TGT_FILTER) ? LFO_TGT_FILTER : p[3];
+                float rate = 0.0f, depth = 0.0f;
+                memcpy(&rate,  p + 4, 4);
+                memcpy(&depth, p + 8, 4);
+                trkLfoRate[t]  = clampF(rate, 0.05f, 40.0f);
+                trkLfoDepth[t] = clampF(depth, 0.0f, 1.0f);
+            } else {
+                /* Legacy: sine + gain target */
+                trkLfoWave[t]   = LFO_WAVE_SINE;
+                trkLfoTarget[t] = LFO_TGT_GAIN;
+                trkLfoRate[t]   = clampF(p[2] * 0.1f, 0.05f, 40.0f);
+                trkLfoDepth[t]  = clampF(p[3] / 100.0f, 0.0f, 1.0f);
+            }
+        }
+        break;
     case CMD_TRACK_PITCH:
     case CMD_TRACK_GATE:
-        /* TODO: implement per-track phaser/tremolo/pitch/gate DSP */
+        /* Track AD gate/envelope para sampler voices
+         * Legacy (2B): [track, active]
+         * Extended (10B): [track, active, attackMs(float), decayMs(float)] */
+        if(hdr->cmd == CMD_TRACK_GATE && len >= 2 && p[0] < MAX_PADS){
+            uint8_t t = p[0];
+            trkEnvAdActive[t] = (p[1] != 0);
+
+            if(len >= 10){
+                float atkMs = 1.0f, decMs = 250.0f;
+                memcpy(&atkMs, p + 2, 4);
+                memcpy(&decMs, p + 6, 4);
+                trkEnvAttackMs[t] = clampF(atkMs, 0.0f, 2000.0f);
+                trkEnvDecayMs[t]  = clampF(decMs, 1.0f, 8000.0f);
+            } else if(len >= 6){
+                uint16_t atkMs16 = 1, decMs16 = 250;
+                memcpy(&atkMs16, p + 2, 2);
+                memcpy(&decMs16, p + 4, 2);
+                trkEnvAttackMs[t] = clampF((float)atkMs16, 0.0f, 2000.0f);
+                trkEnvDecayMs[t]  = clampF((float)decMs16, 1.0f, 8000.0f);
+            }
+        }
         break;
 
     /* ════════════════════════════════════════════
@@ -2319,27 +2892,56 @@ static void ProcessCommand()
             uint8_t padIdx = lk.startPad;
             uint8_t maxIdx = lk.startPad + lk.maxPads;
             if(maxIdx > MAX_PADS) maxIdx = MAX_PADS;
+            bool canonicalLiveRange = (lk.startPad == 0 && lk.maxPads >= 16);
+
+            for(uint8_t i = lk.startPad; i < maxIdx; i++){
+                sampleLoaded[i] = false;
+                sampleLength[i] = 0;
+            }
+
             if(sdPresent && f_opendir(&dir, path) == FR_OK){
-                while(f_readdir(&dir, &fno) == FR_OK && fno.fname[0] != 0
-                      && padIdx < maxIdx){
-                    if(fno.fattrib & AM_DIR) continue;
-                    size_t flen = strlen(fno.fname);
-                    if(flen < 4) continue;
-                    const char* ext = fno.fname + flen - 4;
-                    if(ext[0] != '.' || (ext[1]!='w' && ext[1]!='W')) continue;
-                    char fpath[160];
-                    snprintf(fpath, sizeof(fpath), "%s/%s", path, fno.fname);
-                    if(LoadWavToPad(fpath, padIdx)) padIdx++;
+                if(canonicalLiveRange){
+                    bool padUsed[16] = {};
+                    while(f_readdir(&dir, &fno) == FR_OK && fno.fname[0] != 0){
+                        if(fno.fattrib & AM_DIR) continue;
+                        if(!isWavFile(fno.fname)) continue;
+
+                        int pad = GuessPadFromFilename(fno.fname);
+                        if(pad < 0 || pad >= 16 || padUsed[pad]) continue;
+
+                        char fpath[160];
+                        snprintf(fpath, sizeof(fpath), "%s/%s", path, fno.fname);
+                        if(LoadWavToPad(fpath, (uint8_t)pad))
+                            padUsed[pad] = true;
+                    }
+                } else {
+                    while(f_readdir(&dir, &fno) == FR_OK && fno.fname[0] != 0
+                          && padIdx < maxIdx){
+                        if(fno.fattrib & AM_DIR) continue;
+                        if(!isWavFile(fno.fname)) continue;
+                        char fpath[160];
+                        snprintf(fpath, sizeof(fpath), "%s/%s", path, fno.fname);
+                        if(LoadWavToPad(fpath, padIdx)) padIdx++;
+                    }
                 }
                 f_closedir(&dir);
+
+                if(canonicalLiveRange){
+                    FillMissingCanonicalPadsFromFamilies(0, 16);
+                    padIdx = 16;
+                }
+
                 strncpy(currentKitName, lk.kitName, 31);
                 hw.PrintLine("SD: Kit '%s' loaded pads %d-%d",
                                lk.kitName, lk.startPad, padIdx-1);
                 /* Notify Master */
                 uint32_t mask = 0;
-                for(int i = lk.startPad; i < padIdx; i++)
+                for(int i = lk.startPad; i < maxIdx; i++)
                     if(sampleLoaded[i]) mask |= (1u << i);
-                PushEvent(EVT_SD_KIT_LOADED, padIdx - lk.startPad,
+                uint8_t loadedCount = 0;
+                for(int i = lk.startPad; i < maxIdx; i++)
+                    if(sampleLoaded[i]) loadedCount++;
+                PushEvent(EVT_SD_KIT_LOADED, loadedCount,
                           mask, lk.kitName);
             }
         }
@@ -2582,6 +3184,16 @@ static void ProcessCommand()
             trackReverbSend[i] = 0; trackDelaySend[i] = 0; trackChorusSend[i] = 0;
             trackPanF[i] = 0; trackMute[i] = false; trackSolo[i] = false;
             trkEqLowDb[i] = 0; trkEqMidDb[i] = 0; trkEqHighDb[i] = 0;
+            trkLfoActive[i] = false;
+            trkLfoWave[i]   = LFO_WAVE_SINE;
+            trkLfoTarget[i] = LFO_TGT_GAIN;
+            trkLfoRate[i]   = 1.0f;
+            trkLfoDepth[i]  = 0.0f;
+            trkLfoPhase[i]  = 0.0f;
+            trkLfoSH[i]     = 0.0f;
+            trkEnvAdActive[i] = false;
+            trkEnvAttackMs[i] = 1.0f;
+            trkEnvDecayMs[i]  = 250.0f;
         }
         masterGain = 1.0f; seqVolume = 1.0f; liveVolume = 1.0f; livePitch = 1.0f;
         delayActive = false; reverbActive = false; chorusActive = false;
@@ -2612,9 +3224,41 @@ static void ProcessCommand()
             uint8_t instrument = p[1];
             float velocity = p[2] / 127.0f;
             switch(engine){
-                case SYNTH_ENGINE_808: synth808.Trigger(instrument, velocity); break;
-                case SYNTH_ENGINE_909: synth909.Trigger(instrument, velocity); break;
-                case SYNTH_ENGINE_505: synth505.Trigger(instrument, velocity); break;
+                case SYNTH_ENGINE_808: {
+                    uint8_t inst = instrument;
+                    if(inst >= TR808::INST_COUNT && inst < 16)
+                        inst = padTo808[inst];
+                    else if(inst >= TR808::INST_COUNT)
+                        inst = (uint8_t)(inst % TR808::INST_COUNT);
+                    synth808.Trigger(inst, velocity);
+                    break;
+                }
+                case SYNTH_ENGINE_909: {
+                    uint8_t inst = instrument;
+                    if(inst >= TR909::INST_COUNT && inst < 16)
+                        inst = padTo909[inst];
+                    else if(inst >= TR909::INST_COUNT)
+                        inst = (uint8_t)(inst % TR909::INST_COUNT);
+                    synth909.Trigger(inst, velocity);
+                    break;
+                }
+                case SYNTH_ENGINE_505: {
+                    uint8_t inst = instrument;
+                    if(inst >= TR505::INST_COUNT && inst < 16)
+                        inst = padTo505[inst];
+                    else if(inst >= TR505::INST_COUNT)
+                        inst = (uint8_t)(inst % TR505::INST_COUNT);
+                    synth505.Trigger(inst, velocity);
+                    break;
+                }
+                case SYNTH_ENGINE_303: {
+                    uint8_t slot = (uint8_t)(instrument & 0x0F);
+                    uint8_t note = padTo303Midi[slot];
+                    bool accent = (slot % 4 == 0) || (velocity > 0.85f);
+                    bool slide = (slot % 4 == 3);
+                    acid303.NoteOn(note, accent, slide);
+                    break;
+                }
             }
         }
         break;
@@ -3040,6 +3684,65 @@ static bool isWavFile(const char* fname)
         && (ext[2]=='a'||ext[2]=='A') && (ext[3]=='v'||ext[3]=='V');
 }
 
+static int compareCI(const char* a, const char* b)
+{
+    while(*a && *b){
+        int da = toupper((uint8_t)*a);
+        int db = toupper((uint8_t)*b);
+        if(da != db) return da - db;
+        a++; b++;
+    }
+    return (int)((uint8_t)*a) - (int)((uint8_t)*b);
+}
+
+static bool LoadFirstWavFromFolderToPad(const char* folderPath, uint8_t padIdx)
+{
+    DIR dir;
+    FILINFO fno;
+    char bestName[64] = {};
+    bool found = false;
+
+    if(f_opendir(&dir, folderPath) != FR_OK)
+        return false;
+
+    while(f_readdir(&dir, &fno) == FR_OK && fno.fname[0]){
+        if(fno.fattrib & AM_DIR) continue;
+        if(!isWavFile(fno.fname)) continue;
+
+        if(!found || compareCI(fno.fname, bestName) < 0){
+            strncpy(bestName, fno.fname, sizeof(bestName) - 1);
+            bestName[sizeof(bestName) - 1] = 0;
+            found = true;
+        }
+    }
+    f_closedir(&dir);
+
+    if(!found)
+        return false;
+
+    char fpath[192];
+    snprintf(fpath, sizeof(fpath), "%s/%s", folderPath, bestName);
+    return LoadWavToPad(fpath, padIdx);
+}
+
+static uint8_t FillMissingCanonicalPadsFromFamilies(uint8_t startPad, uint8_t maxPads)
+{
+    uint8_t endPad = startPad + maxPads;
+    if(endPad > 16) endPad = 16;
+    uint8_t filled = 0;
+
+    for(uint8_t pad = startPad; pad < endPad; pad++){
+        if(sampleLoaded[pad]) continue;
+
+        char famPath[96];
+        snprintf(famPath, sizeof(famPath), "%s/%s", SD_DATA_ROOT, PAD_FAMILY_NAMES[pad]);
+        if(LoadFirstWavFromFolderToPad(famPath, pad))
+            filled++;
+    }
+
+    return filled;
+}
+
 /* Auto-load default kit from SD at boot */
 static void AutoLoadFromSD()
 {
@@ -3078,45 +3781,19 @@ static void AutoLoadFromSD()
         }
         f_closedir(&dir);
 
-        /* Pass 2: any remaining .wav files → first free pad slot */
-        if(f_opendir(&dir, kitPath) == FR_OK){
-            while(f_readdir(&dir, &fno) == FR_OK && fno.fname[0]){
-                if(fno.fattrib & AM_DIR) continue;
-                if(!isWavFile(fno.fname)) continue;
-                /* Already loaded this file by keyword? Check by trying to
-                   find an empty slot for overflow/duplicate instruments */
-                int pad = GuessPadFromFilename(fno.fname);
-                if(pad >= 0 && pad < 16 && padUsed[pad]){
-                    /* This instrument already has a sample — find free slot */
-                    int free = -1;
-                    for(int s = 0; s < 16; s++){
-                        if(!padUsed[s]){ free = s; break; }
-                    }
-                    if(free >= 0){
-                        char fpath[192];
-                        snprintf(fpath, sizeof(fpath), "%s/%s", kitPath, fno.fname);
-                        if(LoadWavToPad(fpath, (uint8_t)free)){
-                            padUsed[free] = true;
-                            loaded++;
-                        }
-                    }
-                } else if(pad < 0){
-                    /* Unknown instrument — put in first free slot */
-                    int free = -1;
-                    for(int s = 0; s < 16; s++){
-                        if(!padUsed[s]){ free = s; break; }
-                    }
-                    if(free >= 0){
-                        char fpath[192];
-                        snprintf(fpath, sizeof(fpath), "%s/%s", kitPath, fno.fname);
-                        if(LoadWavToPad(fpath, (uint8_t)free)){
-                            padUsed[free] = true;
-                            loaded++;
-                        }
-                    }
-                }
-            }
-            f_closedir(&dir);
+        /* Deterministic boot mapping:
+           only canonical keyword->pad assignment is loaded for LIVE pads.
+           Duplicates/unknown filenames are ignored here to preserve
+           stable track identity across boots and kits. */
+
+        /* Diagnostic: report missing canonical pads */
+        uint8_t missing = 0;
+        for(int i = 0; i < 16; i++){
+            if(!padUsed[i]) missing++;
+        }
+        if(missing > 0){
+            hw.PrintLine("SD: Kit '%s' missing %d canonical pads",
+                         defaultKitNames[k], missing);
         }
 
         if(loaded > 0){
@@ -3170,6 +3847,14 @@ static void AutoLoadFromSD()
                 }
             }
             f_closedir(&root);
+        }
+    }
+
+    {
+        uint8_t recovered = FillMissingCanonicalPadsFromFamilies(0, 16);
+        if(recovered > 0){
+            hw.PrintLine("SD: Recovered %d missing LIVE pads from /data families",
+                         recovered);
         }
     }
 
@@ -3247,6 +3932,16 @@ static void InitArrays()
         trkEqLowDb[i]  = 0;
         trkEqMidDb[i]  = 0;
         trkEqHighDb[i] = 0;
+        trkLfoActive[i] = false;
+        trkLfoWave[i]   = LFO_WAVE_SINE;
+        trkLfoTarget[i] = LFO_TGT_GAIN;
+        trkLfoRate[i]   = 1.0f;
+        trkLfoDepth[i]  = 0.0f;
+        trkLfoPhase[i]  = 0.0f;
+        trkLfoSH[i]     = 0.0f;
+        trkEnvAdActive[i] = false;
+        trkEnvAttackMs[i] = 1.0f;
+        trkEnvDecayMs[i]  = 250.0f;
     }
     for(int i = 0; i < MAX_VOICES; i++) voices[i].active = false;
 }
@@ -3299,6 +3994,10 @@ static void InitFX()
     synth909.Init(sr);
     synth505.Init(sr);
     acid303.Init(sr);
+    startupAnnounceOsc.Init(sr);
+    startupAnnounceOsc.SetCarrierFreq(100.0f);
+    startupAnnounceOsc.SetFormantFreq(900.0f);
+    startupAnnounceOsc.SetPhaseShift(0.4f);
 
     /* ── Demo Mode Init ── */
     demoSeq.Init(sr, &synth808, &synth909, &acid303);
@@ -3452,11 +4151,11 @@ int main()
     if(kEnableSpiSlave)
     {
         /* ── UART1 (comunicación con ESP32-S3, TEST) — D29=TX(PB14) D30=RX(PB15) 230400 8N1 ── */
-        Log("Iniciando UART1 (230400 8N1)...");
+        Log("Iniciando UART1 (%d 8N1)...", DAISY_UART_BAUD);
         UartHandler::Config uart_config;
         uart_config.periph        = UartHandler::Config::Peripheral::USART_1;
         uart_config.mode          = UartHandler::Config::Mode::TX_RX;
-        uart_config.baudrate      = 230400;
+        uart_config.baudrate      = DAISY_UART_BAUD;
         uart_config.stopbits      = UartHandler::Config::StopBits::BITS_1;
         uart_config.parity        = UartHandler::Config::Parity::NONE;
         uart_config.wordlength    = UartHandler::Config::WordLength::BITS_8;
@@ -3487,7 +4186,7 @@ int main()
     Log(">>> RED808 DRUM MACHINE READY <<<");
 
     Log("STARTUP TONE TEST: tono 1kHz durante 3s (kStartupToneTest=true)");
-    Log("STARTUP SELF-TEST: WAV + 808 + 909 + 505 + 303 (con pausas)");
+    Log("STARTUP SELF-TEST: DESACTIVADO (modo slave listo para master)");
 
     /* ── Main loop ── */
     while(1){

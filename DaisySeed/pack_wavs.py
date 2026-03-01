@@ -24,6 +24,7 @@ import sys
 import struct
 
 WAV_DIR = os.path.join("data", "RED 808 KARZ")
+XTRA_DIR = os.path.join("data", "xtra")
 OUTPUT  = os.path.join("build", "samples.bin")
 
 # Mapeo RED 808 KARZ por prefijo "808 XX"
@@ -42,7 +43,8 @@ KEYWORD_MAP = [
 ]
 
 PAD_NAMES = ["BD","SD","CH","OH","CY","CP","RS","CB",
-             "LT","MT","HT","MA","CL","HC","MC","LC"]
+             "LT","MT","HT","MA","CL","HC","MC","LC",
+             "X0","X1","X2","X3","X4","X5","X6","X7"]
 
 def guess_pad(filename):
     upper = filename.upper()
@@ -69,7 +71,7 @@ def main():
 
     print(f"Encontrados {len(wavfiles)} archivos WAV en {WAV_DIR}")
 
-    # Two-pass pad assignment
+    # Two-pass pad assignment for RED kit (pads 0..15)
     file_pad = [(f, guess_pad(f)) for f in wavfiles]
     entries = []   # (pad, filename, raw_bytes)
     pad_used = set()
@@ -98,6 +100,22 @@ def main():
         pad_used.add(free)
         entries.append((free, fname, raw))
         print(f"  Pad {free:2d} ({PAD_NAMES[free]:2s}) <- {fname} [extra] ({len(raw)} bytes)")
+
+    # Add XTRA folder at pads 16..23
+    if os.path.isdir(XTRA_DIR):
+        xtra_files = sorted(f for f in os.listdir(XTRA_DIR) if f.lower().endswith('.wav'))
+        if xtra_files:
+            print(f"Añadiendo {len(xtra_files)} archivos WAV de {XTRA_DIR}")
+        xtra_pad = 16
+        for fname in xtra_files:
+            if xtra_pad >= 24:
+                print(f"  SKIP XTRA {fname} (sin pads libres en 16..23)")
+                continue
+            path = os.path.join(XTRA_DIR, fname)
+            raw = open(path, 'rb').read()
+            entries.append((xtra_pad, fname, raw))
+            print(f"  Pad {xtra_pad:2d} ({PAD_NAMES[xtra_pad]:2s}) <- {fname} [xtra] ({len(raw)} bytes)")
+            xtra_pad += 1
 
     entries.sort(key=lambda e: e[0])
     count = len(entries)
@@ -150,10 +168,12 @@ def main():
     print(f"  Blob: {OUTPUT}")
     print(f"  WAVs: {total_wav:,} bytes ({total_wav/1024:.1f} KB)")
     print(f"  Blob: {total_blob:,} bytes ({total_blob/1024:.1f} KB)")
-    print(f"  Pads: {count}")
+    redCount  = sum(1 for p, _, _ in entries if p < 16)
+    xtraCount = sum(1 for p, _, _ in entries if p >= 16)
+    print(f"  Pads total: {count} (RED={redCount}, XTRA={xtraCount})")
     print(f"  QSPI firmware:  0x90040000")
     print(f"  QSPI samples:   0x90080000  (256K offset)")
-    print(f"  QSPI disponible: {7936 - 768 - total_blob//1024:.0f} KB restantes")
+    print(f"  QSPI disponible: {7936 - 256 - total_blob//1024:.0f} KB restantes")
     print(f"{'='*50}")
 
 if __name__ == "__main__":
