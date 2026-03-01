@@ -1125,6 +1125,27 @@ static inline float clampF(float v, float lo, float hi){
     return v < lo ? lo : (v > hi ? hi : v);
 }
 
+static inline float VolumeByteToGain(uint8_t volumePct)
+{
+    return clampF((float)volumePct, 0.0f, 150.0f) / 100.0f;
+}
+
+static inline float SoftClipKnee(float x)
+{
+    const float knee = 0.9f;
+    if(x > knee)
+    {
+        float t = x - knee;
+        return knee + t / (1.0f + t * t);
+    }
+    if(x < -knee)
+    {
+        float t = x + knee;
+        return -knee + t / (1.0f + t * t);
+    }
+    return x;
+}
+
 static inline float TriFromPhase(float ph)
 {
     /* 0..1 -> -1..+1 */
@@ -1141,7 +1162,8 @@ static inline float AdDecayCoefFromMs(float decayMs)
 /* Forward decl: usado por el startup self-test */
 static void TriggerPad(uint8_t pad, uint8_t velocity,
                        uint8_t trkVol, int8_t pan,
-                       uint32_t maxSamples);
+                       uint32_t maxSamples,
+                       float sourceVolume = 1.0f);
 
 /* ═══════════════════════════════════════════════════════════════════
  *  Startup self-test en fases
@@ -1669,8 +1691,9 @@ static float BitCrush(float s, uint8_t bits){
  *  20. TRIGGER
  * ═══════════════════════════════════════════════════════════════════ */
 static void TriggerPad(uint8_t pad, uint8_t velocity,
-                       uint8_t trkVol = 100, int8_t pan = 0,
-                       uint32_t maxSamples = 0)
+                       uint8_t trkVol, int8_t pan,
+                       uint32_t maxSamples,
+                       float sourceVolume)
 {
     if(pad >= MAX_PADS || !sampleLoaded[pad]) return;
 
@@ -1692,7 +1715,10 @@ static void TriggerPad(uint8_t pad, uint8_t velocity,
     uint32_t len = sampleLength[pad];
     if(maxSamples > 0 && maxSamples < len) len = maxSamples;
 
-    float gain = (velocity / 127.0f) * (trkVol / 100.0f) * trackGain[pad];
+    float gain = (velocity / 127.0f)
+               * VolumeByteToGain(trkVol)
+               * trackGain[pad]
+               * clampF(sourceVolume, 0.0f, 1.5f);
     float panF = trackPanF[pad] + (pan / 100.0f);
     panF = clampF(panF, -1.0f, 1.0f);
     float gL = gain * (1.0f - clampF(panF, 0.f, 1.f));
@@ -2141,8 +2167,8 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
             L = clampF(L, -1.0f, 1.0f);
             R = clampF(R, -1.0f, 1.0f);
         } else {
-            L = tanhf(L);
-            R = tanhf(R);
+            L = SoftClipKnee(L);
+            R = SoftClipKnee(R);
         }
 
         out[0][i] = L;
@@ -2218,7 +2244,7 @@ static void ProcessCommand()
             uint8_t pad = p[0];
             uint8_t vel = p[1];
             if(kAcceptOneBasedPadIndex && pad > 0) pad -= 1;
-            TriggerPad(pad, vel);
+            TriggerPad(pad, vel, 100, 0, 0, liveVolume);
             spiLastTriggerMs = hw.system.GetNow();
             if(kTriggerSynthOnLiveCmd)
                 Synth808TriggerByPad(pad, clampF(vel / 127.0f, 0.0f, 1.0f));
@@ -2230,7 +2256,7 @@ static void ProcessCommand()
             uint8_t pad = p[0];
             if(kAcceptOneBasedPadIndex && pad > 0) pad -= 1;
             uint32_t maxS = 0; memcpy(&maxS, p + 4, 4);
-            TriggerPad(pad, p[1], p[2], (int8_t)p[3], maxS);
+            TriggerPad(pad, p[1], p[2], (int8_t)p[3], maxS, seqVolume);
             spiLastTriggerMs = hw.system.GetNow();
             if(kTriggerSynthOnLiveCmd)
                 Synth808TriggerByPad(pad, clampF(p[1] / 127.0f, 0.0f, 1.0f));
@@ -2256,16 +2282,16 @@ static void ProcessCommand()
      *  VOLUME
      * ════════════════════════════════════════════ */
     case CMD_MASTER_VOLUME:
-        if(len >= 1 && !kForceMasterGainDebug) masterGain = p[0] / 100.0f;
+        if(len >= 1 && !kForceMasterGainDebug) masterGain = VolumeByteToGain(p[0]);
         break;
     case CMD_SEQ_VOLUME:
-        if(len >= 1) seqVolume = p[0] / 100.0f;
+        if(len >= 1) seqVolume = VolumeByteToGain(p[0]);
         break;
     case CMD_LIVE_VOLUME:
-        if(len >= 1) liveVolume = p[0] / 100.0f;
+        if(len >= 1) liveVolume = VolumeByteToGain(p[0]);
         break;
     case CMD_TRACK_VOLUME:
-        if(len >= 2 && p[0] < MAX_PADS) trackGain[p[0]] = p[1] / 100.0f;
+        if(len >= 2 && p[0] < MAX_PADS) trackGain[p[0]] = VolumeByteToGain(p[1]);
         break;
     case CMD_LIVE_PITCH:
         if(len >= 4){
@@ -2338,17 +2364,23 @@ static void ProcessCommand()
         if(len >= 1) delayActive = (p[0] != 0);
         break;
     case CMD_DELAY_TIME:
-        if(len >= 2){
-            uint16_t ms = 0; memcpy(&ms, p, 2);
-            delayTime = (float)ms;
+        if(len >= 4){
+            float ms; memcpy(&ms, p, 4);
+            delayTime = clampF(ms, 10.f, 2000.f);
+            masterDelay.SetDelay(delayTime / 1000.0f * (float)SR);
+        } else if(len >= 2){
+            uint16_t ms16 = 0; memcpy(&ms16, p, 2);
+            delayTime = (float)ms16;
             masterDelay.SetDelay(delayTime / 1000.0f * (float)SR);
         }
         break;
     case CMD_DELAY_FEEDBACK:
-        if(len >= 1) delayFeedback = p[0] / 100.0f;
+        if(len >= 4){ float v; memcpy(&v, p, 4); delayFeedback = clampF(v, 0.f, 0.95f); }
+        else if(len >= 1) delayFeedback = p[0] / 100.0f;
         break;
     case CMD_DELAY_MIX:
-        if(len >= 1) delayMix = p[0] / 100.0f;
+        if(len >= 4){ float v; memcpy(&v, p, 4); delayMix = clampF(v, 0.f, 1.f); }
+        else if(len >= 1) delayMix = p[0] / 100.0f;
         break;
 
     /* ════════════════════════════════════════════
@@ -2358,13 +2390,16 @@ static void ProcessCommand()
         if(len >= 1) phaserActive = (p[0] != 0);
         break;
     case CMD_PHASER_RATE:
-        if(len >= 1) masterPhaser.SetFreq(p[0] / 10.0f);
+        if(len >= 4){ float v; memcpy(&v, p, 4); masterPhaser.SetFreq(clampF(v * 10.f, 0.1f, 10.f)); }
+        else if(len >= 1) masterPhaser.SetFreq(p[0] / 10.0f);
         break;
     case CMD_PHASER_DEPTH:
-        if(len >= 1) masterPhaser.SetLfoDepth(p[0] / 100.0f);
+        if(len >= 4){ float v; memcpy(&v, p, 4); masterPhaser.SetLfoDepth(clampF(v, 0.f, 1.f)); }
+        else if(len >= 1) masterPhaser.SetLfoDepth(p[0] / 100.0f);
         break;
     case CMD_PHASER_FEEDBACK:
-        if(len >= 1) masterPhaser.SetFeedback(p[0] / 100.0f);
+        if(len >= 4){ float v; memcpy(&v, p, 4); masterPhaser.SetFeedback(clampF(v, 0.f, 0.95f)); }
+        else if(len >= 1) masterPhaser.SetFeedback(p[0] / 100.0f);
         break;
 
     /* ════════════════════════════════════════════
@@ -2374,16 +2409,20 @@ static void ProcessCommand()
         if(len >= 1) flangerActive = (p[0] != 0);
         break;
     case CMD_FLANGER_RATE:
-        if(len >= 1) flangerRate = clampF(p[0] * 0.1f, 0.1f, 20.f);
+        if(len >= 4){ float v; memcpy(&v, p, 4); flangerRate = clampF(v * 10.f, 0.1f, 10.f); }
+        else if(len >= 1) flangerRate = clampF(p[0] * 0.1f, 0.1f, 20.f);
         break;
     case CMD_FLANGER_DEPTH:
-        if(len >= 1) flangerDepth = p[0] / 100.0f;
+        if(len >= 4){ float v; memcpy(&v, p, 4); flangerDepth = clampF(v, 0.f, 1.f); }
+        else if(len >= 1) flangerDepth = p[0] / 100.0f;
         break;
     case CMD_FLANGER_FEEDBACK:
-        if(len >= 1) flangerFb = p[0] / 100.0f;
+        if(len >= 4){ float v; memcpy(&v, p, 4); flangerFb = clampF(v, -0.95f, 0.95f); }
+        else if(len >= 1) flangerFb = p[0] / 100.0f;
         break;
     case CMD_FLANGER_MIX:
-        if(len >= 1) flangerMix = p[0] / 100.0f;
+        if(len >= 4){ float v; memcpy(&v, p, 4); flangerMix = clampF(v, 0.f, 1.f); }
+        else if(len >= 1) flangerMix = p[0] / 100.0f;
         break;
 
     /* ════════════════════════════════════════════
@@ -2393,19 +2432,24 @@ static void ProcessCommand()
         if(len >= 1) compActive = (p[0] != 0);
         break;
     case CMD_COMP_THRESHOLD:
-        if(len >= 1) masterComp.SetThreshold(-((float)p[0]));
+        if(len >= 4){ float v; memcpy(&v, p, 4); masterComp.SetThreshold(clampF(v, -60.f, 0.f)); }
+        else if(len >= 1) masterComp.SetThreshold(-((float)p[0]));
         break;
     case CMD_COMP_RATIO:
-        if(len >= 1) masterComp.SetRatio((float)p[0]);
+        if(len >= 4){ float v; memcpy(&v, p, 4); masterComp.SetRatio(clampF(v, 1.f, 20.f)); }
+        else if(len >= 1) masterComp.SetRatio((float)p[0]);
         break;
     case CMD_COMP_ATTACK:
-        if(len >= 1) masterComp.SetAttack((float)p[0] / 1000.0f);
+        if(len >= 4){ float v; memcpy(&v, p, 4); masterComp.SetAttack(clampF(v, 0.1f, 100.f) / 1000.f); }
+        else if(len >= 1) masterComp.SetAttack((float)p[0] / 1000.0f);
         break;
     case CMD_COMP_RELEASE:
-        if(len >= 1) masterComp.SetRelease((float)p[0] / 1000.0f);
+        if(len >= 4){ float v; memcpy(&v, p, 4); masterComp.SetRelease(clampF(v, 10.f, 500.f) / 1000.f); }
+        else if(len >= 1) masterComp.SetRelease((float)p[0] / 1000.0f);
         break;
     case CMD_COMP_MAKEUP:
-        if(len >= 1) masterComp.SetMakeup((float)p[0] / 10.0f);
+        if(len >= 4){ float v; memcpy(&v, p, 4); masterComp.SetMakeup(clampF(v, 0.f, 30.f)); }
+        else if(len >= 1) masterComp.SetMakeup((float)p[0] / 10.0f);
         break;
 
     /* ════════════════════════════════════════════
@@ -2415,20 +2459,29 @@ static void ProcessCommand()
         if(len >= 1) reverbActive = (p[0] != 0);
         break;
     case CMD_REVERB_FEEDBACK:
-        if(len >= 1){
+        if(len >= 4){
+            float v; memcpy(&v, p, 4);
+            reverbFeedback = clampF(v, 0.f, 0.99f);
+            masterReverb.SetFeedback(reverbFeedback);
+        } else if(len >= 1){
             reverbFeedback = p[0] / 100.0f;
             masterReverb.SetFeedback(reverbFeedback);
         }
         break;
     case CMD_REVERB_LPFREQ:
-        if(len >= 2){
+        if(len >= 4){
+            float v; memcpy(&v, p, 4);
+            reverbLpFreq = clampF(v, 200.f, 12000.f);
+            masterReverb.SetLpFreq(reverbLpFreq);
+        } else if(len >= 2){
             uint16_t f = 0; memcpy(&f, p, 2);
             reverbLpFreq = (float)f;
             masterReverb.SetLpFreq(reverbLpFreq);
         }
         break;
     case CMD_REVERB_MIX:
-        if(len >= 1) reverbMix = p[0] / 100.0f;
+        if(len >= 4){ float v; memcpy(&v, p, 4); reverbMix = clampF(v, 0.f, 1.f); }
+        else if(len >= 1) reverbMix = p[0] / 100.0f;
         break;
 
     /* ════════════════════════════════════════════
@@ -2438,13 +2491,16 @@ static void ProcessCommand()
         if(len >= 1) chorusActive = (p[0] != 0);
         break;
     case CMD_CHORUS_RATE:
-        if(len >= 1) masterChorus.SetLfoFreq(p[0] / 10.0f);
+        if(len >= 4){ float v; memcpy(&v, p, 4); masterChorus.SetLfoFreq(clampF(v, 0.1f, 10.f)); }
+        else if(len >= 1) masterChorus.SetLfoFreq(p[0] / 10.0f);
         break;
     case CMD_CHORUS_DEPTH:
-        if(len >= 1) masterChorus.SetLfoDepth(p[0] / 100.0f);
+        if(len >= 4){ float v; memcpy(&v, p, 4); masterChorus.SetLfoDepth(clampF(v, 0.f, 1.f)); }
+        else if(len >= 1) masterChorus.SetLfoDepth(p[0] / 100.0f);
         break;
     case CMD_CHORUS_MIX:
-        if(len >= 1) chorusMix = p[0] / 100.0f;
+        if(len >= 4){ float v; memcpy(&v, p, 4); chorusMix = clampF(v, 0.f, 1.f); }
+        else if(len >= 1) chorusMix = p[0] / 100.0f;
         break;
 
     /* ════════════════════════════════════════════
@@ -2454,17 +2510,20 @@ static void ProcessCommand()
         if(len >= 1) tremoloActive = (p[0] != 0);
         break;
     case CMD_TREMOLO_RATE:
-        if(len >= 1) masterTremolo.SetFreq(p[0] / 10.0f);
+        if(len >= 4){ float v; memcpy(&v, p, 4); masterTremolo.SetFreq(clampF(v, 0.1f, 20.f)); }
+        else if(len >= 1) masterTremolo.SetFreq(p[0] / 10.0f);
         break;
     case CMD_TREMOLO_DEPTH:
-        if(len >= 1) masterTremolo.SetDepth(p[0] / 100.0f);
+        if(len >= 4){ float v; memcpy(&v, p, 4); masterTremolo.SetDepth(clampF(v, 0.f, 1.f)); }
+        else if(len >= 1) masterTremolo.SetDepth(p[0] / 100.0f);
         break;
 
     /* ════════════════════════════════════════════
      *  WAVEFOLDER + LIMITER (0x4E-0x4F)
      * ════════════════════════════════════════════ */
     case CMD_WAVEFOLDER_GAIN:
-        if(len >= 1) waveFolderGain = p[0] / 10.0f;
+        if(len >= 4){ float v; memcpy(&v, p, 4); waveFolderGain = clampF(v, 1.f, 10.f); }
+        else if(len >= 1) waveFolderGain = p[0] / 10.0f;
         break;
     case CMD_LIMITER_ACTIVE:
         if(len >= 1) limiterActive = (p[0] != 0);
@@ -2474,15 +2533,16 @@ static void ProcessCommand()
      *  PER-TRACK FX (0x50-0x65)
      * ════════════════════════════════════════════ */
     case CMD_TRACK_FILTER:
-        if(len >= 20){
+        if(len >= 12){
             uint8_t t = p[0]; if(t >= MAX_PADS) break;
             trkFilterType[t] = p[1];
-            float cut, res;
+            float cut, res, gain = 0.f;
             memcpy(&cut, p + 4, 4);
             memcpy(&res, p + 8, 4);
+            if(len >= 16) memcpy(&gain, p + 12, 4);
             trkFilterCut[t] = clampF(cut, 20.f, 20000.f);
             trkFilterQ[t]   = clampF(res, 0.3f, 10.f);
-            trkFilter[t].SetType(p[1], trkFilterCut[t], trkFilterQ[t], (float)SR);
+            trkFilter[t].SetType(p[1], trkFilterCut[t], trkFilterQ[t], (float)SR, gain);
         }
         break;
     case CMD_TRACK_CLEAR_FILTER:
@@ -2511,6 +2571,9 @@ static void ProcessCommand()
             memcpy(&timeMs, p + 4, 4);
             memcpy(&fb,     p + 8, 4);
             memcpy(&mix,    p + 12, 4);
+            /* ESP32 sends fb & mix as 0-100 percentage; normalise to 0.0-1.0 */
+            if(fb   > 1.0f) fb  /= 100.0f;
+            if(mix  > 1.0f) mix /= 100.0f;
             trkEchoDelay[t] = clampF(timeMs * (float)SR / 1000.f, 1.f, (float)(TRACK_ECHO_SIZE-1));
             trkEchoFb[t]    = clampF(fb, 0.f, 0.95f);
             trkEchoMix[t]   = clampF(mix, 0.f, 1.f);
@@ -2520,14 +2583,18 @@ static void ProcessCommand()
         if(len >= 16 && p[0] < MAX_PADS){
             uint8_t t = p[0];
             trkFlgActive[t] = (p[1] != 0);
-            float depth, rate, fb, mix;
+            float depth, rate, fb;
             memcpy(&depth, p + 4, 4);
             memcpy(&rate,  p + 8, 4);
             memcpy(&fb,    p + 12, 4);
+            /* ESP32 sends percentage 0-100; normalise to 0.0-1.0 */
+            if(depth > 1.0f) depth /= 100.0f;
+            if(rate  > 1.0f) rate   = rate / 100.0f * 5.0f; /* 0-100% → 0-5 Hz */
+            if(fb    > 1.0f) fb    /= 100.0f;
             trkFlgDepth[t] = clampF(depth, 0.f, 1.f);
-            trkFlgRate[t]  = clampF(rate, 0.1f, 20.f);
+            trkFlgRate[t]  = clampF(rate, 0.1f, 10.f);
             trkFlgFb[t]    = clampF(fb, 0.f, 0.95f);
-            trkFlgMix[t]   = clampF(mix, 0.f, 1.f);
+            trkFlgMix[t]   = 0.5f;  /* fixed 50/50; payload has no mix field */
         }
         break;
     case CMD_TRACK_COMPRESSOR:
@@ -2537,6 +2604,8 @@ static void ProcessCommand()
             float thresh, ratio;
             memcpy(&thresh, p + 4, 4);
             memcpy(&ratio,  p + 8, 4);
+            /* ESP32 sends threshold in dB (e.g. -20); convert to linear 0.01-1.0 */
+            if(thresh <= 0.f) thresh = powf(10.f, clampF(thresh, -60.f, 0.f) / 20.f);
             trkCompThresh[t] = clampF(thresh, 0.01f, 1.f);
             trkCompRatio[t]  = clampF(ratio, 1.f, 20.f);
         }
@@ -2650,6 +2719,8 @@ static void ProcessCommand()
                 float rate = 0.0f, depth = 0.0f;
                 memcpy(&rate,  p + 4, 4);
                 memcpy(&depth, p + 8, 4);
+                /* ESP32 may send depth as percentage 0-100; normalise */
+                if(depth > 1.0f) depth /= 100.0f;
                 trkLfoRate[t]  = clampF(rate, 0.05f, 40.0f);
                 trkLfoDepth[t] = clampF(depth, 0.0f, 1.0f);
             } else {
@@ -2693,12 +2764,13 @@ static void ProcessCommand()
         if(len >= 12 && p[0] < MAX_PADS){
             uint8_t pad = p[0];
             padFilterType[pad] = p[1];
-            float cut, res;
+            float cut, res, gain = 0.f;
             memcpy(&cut, p + 4, 4);
             memcpy(&res, p + 8, 4);
+            if(len >= 16) memcpy(&gain, p + 12, 4);
             padFilterCut[pad] = clampF(cut, 20.f, 20000.f);
             padFilterQ[pad]   = clampF(res, 0.3f, 10.f);
-            padFilter[pad].SetType(p[1], padFilterCut[pad], padFilterQ[pad], (float)SR);
+            padFilter[pad].SetType(p[1], padFilterCut[pad], padFilterQ[pad], (float)SR, gain);
         }
         break;
     case CMD_PAD_CLEAR_FILTER:
@@ -3371,7 +3443,7 @@ static void ProcessCommand()
         if(len >= 2){
             uint8_t count = p[0];
             for(uint8_t i = 0; i < count && (1 + i*2 + 1) < len; i++)
-                TriggerPad(p[1 + i*2], p[1 + i*2 + 1]);
+                TriggerPad(p[1 + i*2], p[1 + i*2 + 1], 100, 0, 0, seqVolume);
         }
         break;
 
