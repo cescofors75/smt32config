@@ -46,10 +46,11 @@ using namespace daisysp;
 DaisySeed hw;
 UartHandler uart_slave;
 
-/* SPI1 Slave — register-level polling (comunicación ESP32-S3 master)
+/* SPI1 Slave — Comunicación ESP32-S3 master
  * Pines: D7=PG10(NSS) D8=PG11(SCK) D9=PB4(MISO) D10=PB5(MOSI)
- * Sin DMA, sin EXTI — polling directo del FIFO y GPIO en main loop.
  */
+static DMA_HandleTypeDef  hdma_spi1_rx;
+static DMA_HandleTypeDef  hdma_spi1_tx;
 
 /* ═══════════════════════════════════════════════════════════════════
  *  2. CONFIGURACIÓN
@@ -362,6 +363,7 @@ struct Voice {
     float    envDecayCoef;
     uint8_t  envStage; /* 0=attack,1=decay,2=bypass */
     uint32_t age;
+    uint32_t maxLen;  /* 0 = full sample, else corta al llegar aquí */
 };
 static Voice   voices[MAX_VOICES];
 static uint32_t voiceAge = 0;
@@ -655,6 +657,7 @@ static float    scEnv       = 0.0f;
  *  16. SD CARD (SPI3 master — módulo 6 pines)
  *  Conexión: CS=D0(PB12) SCK=D2(PC10) MISO=D1(PC11) MOSI=D6(PC12)
  * ═══════════════════════════════════════════════════════════════════ */
+static SpiHandle  spi1_slave;      /* SPI1 slave ← ESP32-S3 master     */
 static SpiHandle  sd_spi;         /* SPI3 master for SD card          */
 static GPIO       sd_cs;           /* D0 = PB12 for CS (GPIO manual)   */
 static FATFS      sdFatFs;        /* FatFS filesystem object           */
@@ -936,6 +939,7 @@ static uint8_t PopEvents(NotifyEvent* dst, uint8_t maxEvents)
  * ═══════════════════════════════════════════════════════════════════ */
 static volatile uint32_t spiPktCnt = 0;
 static volatile uint16_t spiErrCnt = 0;
+static volatile uint16_t spiRingDrops = 0;  /* bytes perdidos por ring lleno */
 static volatile uint32_t spiLastPacketMs = 0;
 static volatile uint32_t spiLastTriggerMs = 0;
 static volatile uint32_t uartLedPulseUntilMs = 0;
@@ -1037,7 +1041,7 @@ static constexpr bool kEnableSynth505 = true;  /* habilitado para demo completa 
 static constexpr bool kAudioSafeMode = false; /* callback de audio real */
 static constexpr bool kBootDiagMinimal = false; /* diagnóstico extremo: solo LED, sin audio ni FX */
 static constexpr bool kEnableAudioStart = true; /* iniciar audio normal */
-static constexpr bool kEnableStartLog = false; /* diagnóstico: aislar StartLog/USB */
+static constexpr bool kEnableStartLog = true;  /* diagnóstico: ver log boot QSPI/muestras */
 static constexpr bool kEnableInitFx = true;    /* diagnóstico: reactivar InitFX para aislar causa */
 static constexpr bool kStartupToneTest = false; /* tono confirmado OK, desactivado */
 static constexpr bool kStartup808SelfTest = false; /* desactivado: arranque limpio, espera comandos del master */
@@ -1719,6 +1723,9 @@ static void TriggerPad(uint8_t pad, uint8_t velocity,
     uint32_t len = sampleLength[pad];
     if(maxSamples > 0 && maxSamples < len) len = maxSamples;
 
+    /* Guardar límite efectivo en la voz */
+    voices[slot].maxLen = len;
+
     float gain = (velocity / 127.0f)
                * VolumeByteToGain(trkVol)
                * trackGain[pad]
@@ -1757,6 +1764,9 @@ static uint8_t ActiveVoices(){
     return c;
 }
 
+/* Forward decl – definida más abajo, pero la llamamos desde AudioCallback */
+static void SpiDrainRxToRing();
+
 /* ═══════════════════════════════════════════════════════════════════
  *  21. AUDIO CALLBACK
  * ═══════════════════════════════════════════════════════════════════ */
@@ -1790,6 +1800,11 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
     float mixPeak = 0.0f;
 
     for(size_t i = 0; i < size; i++){
+        /* ── Drenar SPI FIFO cada 4 samples (~83µs) para evitar overflow
+         *    durante el audio callback.  DMA audio tiene prioridad máxima (0)
+         *    así que TIM6 NO puede preemptar → debemos drenar aquí.          */
+        if((i & 3) == 0) SpiDrainRxToRing();
+
         float busL = 0, busR = 0;
         float reverbBusL = 0, delayBusL = 0, chorusBusL = 0;
         float sideSrc = 0;
@@ -1827,13 +1842,15 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
 
             /* Position / bounds */
             uint32_t idx = (uint32_t)fabsf(vx.pos);
+            uint32_t endLen = (vx.maxLen > 0 && vx.maxLen < sampleLength[p])
+                             ? vx.maxLen : sampleLength[p];
             if(padReverse[p]){
                 if(vx.pos < 0.0f){
-                    if(padLoop[p]) vx.pos = (float)(sampleLength[p] - 1);
+                    if(padLoop[p]) vx.pos = (float)(endLen - 1);
                     else { vx.active = false; continue; }
                 }
             } else {
-                if(idx >= sampleLength[p]){
+                if(idx >= endLen){
                     if(padLoop[p]){ vx.pos = 0.0f; idx = 0; }
                     else { vx.active = false; continue; }
                 }
@@ -3198,7 +3215,11 @@ static void ProcessCommand()
             if(sampleLoaded[i]) resp[9] |= (1 << (i-16));
         /* resp[10]: pending event count → Master sabe si debe llamar CMD_GET_EVENTS */
         resp[10] = evtCount;
-        /* resp[11-13]: reserved */
+        /* resp[11-12]: spiErrCnt (diagnostico CRC/parse errors) */
+        resp[11] = (uint8_t)(spiErrCnt & 0xFF);
+        resp[12] = (uint8_t)((spiErrCnt >> 8) & 0xFF);
+        /* resp[13]: spiRingDrops (bytes perdidos por ring buffer lleno) */
+        resp[13] = (uint8_t)(spiRingDrops > 255 ? 255 : spiRingDrops);
         /* resp[14-45]: currentKitName (32 chars) */
         strncpy((char*)(resp + 14), currentKitName, 31);
         /* resp[46-53]: total loaded sample count + total sample bytes (info) */
@@ -3446,8 +3467,21 @@ static void ProcessCommand()
     case CMD_BULK_TRIGGERS:
         if(len >= 2){
             uint8_t count = p[0];
-            for(uint8_t i = 0; i < count && (1 + i*2 + 1) < len; i++)
-                TriggerPad(p[1 + i*2], p[1 + i*2 + 1], 100, 0, 0, seqVolume);
+            /* Formato completo: count(1) + reserved(1) + N×TriggerSeqPayload(8) */
+            const uint8_t* tp = p + 2; /* skip count + reserved */
+            for(uint8_t i = 0; i < count; i++){
+                uint16_t off = i * 8;
+                if(off + 8 > (len - 2)) break;
+                uint8_t  pad = tp[off];
+                if(kAcceptOneBasedPadIndex && pad > 0) pad -= 1;
+                uint8_t  vel = tp[off + 1];
+                uint8_t  tvol = tp[off + 2];
+                int8_t   pan = (int8_t)tp[off + 3];
+                uint32_t maxS = 0;
+                memcpy(&maxS, tp + off + 4, 4);
+                TriggerPad(pad, vel, tvol, pan, maxS, seqVolume);
+            }
+            spiLastTriggerMs = hw.system.GetNow();
         }
         break;
 
@@ -3486,200 +3520,110 @@ static void ProcessCommand()
 /* ═══════════════════════════════════════════════════════════════════
  *  24-A. SPI1 SLAVE — Transporte SPI con ESP32-S3 master
  *
- *  Estrategia: Register-level polling (sin DMA, sin EXTI)
- *  - Main loop lee NSS (CS) pin directamente via GPIOG IDR
- *  - Cuando CS baja, lee bytes del FIFO SPI hasta que CS sube
- *  - Procesa comando inmediatamente, arma respuesta
- *  - Cuando CS baja de nuevo (segunda transacción), envía respuesta
- *
- *  Ventajas sobre DMA+EXTI:
- *  - Sin problemas de HAL state machine lockup
- *  - Sin conflictos EXTI/AF en STM32H7
- *  - Sin timing issues con DMA TSIZE vs bytes reales
- *  - Latencia predecible: <5µs desde primer byte
- *
- *  Performance: @2MHz SPI clock, 1 byte = 4µs. Main loop @480MHz
- *  puede polling sin perder bytes. Audio callback cada 2.67ms
- *  (128 samples @ 48kHz) tiene mayor prioridad.
+ *  Estrategia: Hardware Circular DMA RX + Packet Framer en Main Loop
+ *  - DMA Stream7 lee SPI1_RX continuamente hacia rxBuf (ring buffer)
+ *  - Main loop procesa bytes según llegan armando un header
+ *  - Sin timeouts, sin bloqueos del audio callback
  * ═══════════════════════════════════════════════════════════════════ */
 
-/* Inline helpers para leer NSS (CS) pin — PG10 */
-static inline bool SPI_CS_IS_LOW()  { return !(GPIOG->IDR & GPIO_PIN_10); }
-static inline bool SPI_CS_IS_HIGH() { return  (GPIOG->IDR & GPIO_PIN_10); }
+static uint8_t  parseBuf[RX_BUF_SIZE];
+static uint16_t parseIdx = 0;
+static uint16_t rxReadPtr = 0;
+static volatile bool spiTxPending = false;
+static volatile uint32_t spiSlvIsrCnt = 0;
 
-static volatile uint32_t spiSlvIsrCnt = 0;  /* debug: transacciones completadas */
+/* Índice del siguiente byte a cargar en TXFIFO durante respuesta */
+static volatile uint16_t spiTxIdx = 0;
 
-/* ── SPI1 slave init — registros directos ────────────────────── */
+/* ═══ SPI1 RX ring buffer (TIM6 ISR escribe, main loop lee) ═══
+ * 2048 bytes = ~128 paquetes TRIG_SEQ (16B c/u).
+ * TIM6 ISR drena RXFIFO cada ~100µs, previniendo OVR incluso
+ * durante el audio callback (~2.7ms con AUDIO_BLOCK=128).         */
+#define SPI_RING_BITS  11
+#define SPI_RING_SIZE  (1 << SPI_RING_BITS)   /* 2048 */
+#define SPI_RING_MASK  (SPI_RING_SIZE - 1)
+static volatile uint8_t  spiRing[SPI_RING_SIZE];
+static volatile uint16_t spiRingHead = 0;   /* escrito por ISR o AudioCB */
+static volatile uint16_t spiRingTail = 0;   /* escrito SOLO por main     */
+static volatile bool     spiDrainBusy = false; /* anti-reentrada */
+
+static void SpiDrainRxToRing()
+{
+    if(spiDrainBusy) return;        /* reentrada → salir */
+    spiDrainBusy = true;
+
+    while(SPI1->SR & SPI_SR_RXP) {
+        uint8_t b = *(volatile uint8_t*)&SPI1->RXDR;
+        uint16_t next = (spiRingHead + 1) & SPI_RING_MASK;
+        if(next != spiRingTail) {
+            spiRing[spiRingHead] = b;
+            spiRingHead = next;
+        } else {
+            spiRingDrops++;  /* ring lleno — byte perdido */
+        }
+    }
+    if(SPI1->SR & SPI_SR_OVR) {
+        SPI1->IFCR = SPI_IFCR_OVRC;
+        spiErrCnt++;
+    }
+
+    spiDrainBusy = false;
+}
+
+extern "C" void TIM6_DAC_IRQHandler(void)
+{
+    TIM6->SR = 0;           /* clear UIF */
+    SpiDrainRxToRing();
+}
+
+static void InitSpiDrainTimer()
+{
+    /* TIM6: basic timer, 10kHz (100µs period)
+     * APB1 timer clock = 200MHz (STM32H750 @ 400MHz)
+     * A 1MHz SPI, 16-byte FIFO se llena en ~128µs.
+     * 100µs period + drain inline en AudioCallback cubre todos los casos.
+     * Prioridad 1 → puede preemptar DMA audio (prio 2 tras override). */
+    __HAL_RCC_TIM6_CLK_ENABLE();
+    TIM6->CR1  = 0;
+    TIM6->PSC  = 1;                        /* /2 → 100MHz             */
+    TIM6->ARR  = 10000 - 1;                /* 100MHz / 10000 = 10kHz   */
+    TIM6->DIER = TIM_DIER_UIE;             /* update interrupt enable   */
+    NVIC_SetPriority(TIM6_DAC_IRQn, 1);    /* ENCIMA de audio DMA(2)    */
+    NVIC_EnableIRQ(TIM6_DAC_IRQn);
+    TIM6->CR1  = TIM_CR1_CEN;              /* start                     */
+}
+
 static void InitSpi1Slave()
 {
-    /* 1. Clocks */
+    /* ── SPI1 SLAVE — polling directo RXDR/TXDR sin HAL state machine ──
+     * D7=PG10(NSS) D8=PG11(SCK) D9=PB4(MISO) D10=PB5(MOSI)
+     * Mode0 (CPOL=0 CPHA=0), 8-bit, NSS hardware input               */
     __HAL_RCC_SPI1_CLK_ENABLE();
     __HAL_RCC_GPIOG_CLK_ENABLE();
     __HAL_RCC_GPIOB_CLK_ENABLE();
 
-    /* 2. GPIO — AF5 para SCK, MISO, MOSI. NSS como AF5 también
-     *    (SPI NSS hard input) pero leemos IDR para polling CS    */
-    GPIO_InitTypeDef gpio = {};
-    gpio.Mode      = GPIO_MODE_AF_PP;
-    gpio.Speed     = GPIO_SPEED_FREQ_VERY_HIGH;
-    gpio.Alternate = GPIO_AF5_SPI1;
+    GPIO_InitTypeDef g = {};
+    g.Mode      = GPIO_MODE_AF_PP;
+    g.Speed     = GPIO_SPEED_FREQ_VERY_HIGH;
+    g.Pull      = GPIO_NOPULL;
+    g.Alternate = GPIO_AF5_SPI1;
+    g.Pin = GPIO_PIN_10; HAL_GPIO_Init(GPIOG, &g); /* NSS  D7 */
+    g.Pin = GPIO_PIN_11; HAL_GPIO_Init(GPIOG, &g); /* SCK  D8 */
+    g.Pin = GPIO_PIN_4;  HAL_GPIO_Init(GPIOB, &g); /* MISO D9 */
+    g.Pin = GPIO_PIN_5;  HAL_GPIO_Init(GPIOB, &g); /* MOSI D10 */
 
-    /* PG10 = NSS — AF5 + pull-up (idle HIGH) */
-    gpio.Pin  = GPIO_PIN_10;
-    gpio.Pull = GPIO_PULLUP;
-    HAL_GPIO_Init(GPIOG, &gpio);
+    SPI_TypeDef* s = SPI1;
+    s->CR1  &= ~SPI_CR1_SPE;           /* deshabilitar para configurar */
+    /* 8-bit (DSIZE=7), FIFO threshold=1, sin DMA */
+    s->CFG1  = (7U << SPI_CFG1_DSIZE_Pos) | (0U << SPI_CFG1_FTHLV_Pos);
+    /* Slave, Mode0 (CPOL=0 CPHA=0), NSS hardware input, full-duplex   */
+    s->CFG2  = 0;
+    s->CR2   = 0;
+    s->IFCR  = 0xFFFFFFFFUL;           /* limpiar todos los flags      */
+    s->CR1  |= SPI_CR1_SPE;            /* habilitar SPI                */
 
-    /* PG11 = SCK */
-    gpio.Pin  = GPIO_PIN_11;
-    gpio.Pull = GPIO_NOPULL;
-    HAL_GPIO_Init(GPIOG, &gpio);
-
-    /* PB4 = MISO (slave output) */
-    gpio.Pin  = GPIO_PIN_4;
-    gpio.Pull = GPIO_NOPULL;
-    HAL_GPIO_Init(GPIOB, &gpio);
-
-    /* PB5 = MOSI (slave input) */
-    gpio.Pin  = GPIO_PIN_5;
-    gpio.Pull = GPIO_NOPULL;
-    HAL_GPIO_Init(GPIOB, &gpio);
-
-    /* 3. SPI1 — registros directos (NO HAL_SPI_Init, evita conflicto
-     *    con libdaisy SPI handles)                                    */
-    SPI_TypeDef* spi = SPI1;
-
-    /* Disable SPI para configurar */
-    spi->CR1 &= ~SPI_CR1_SPE;
-
-    /* CFG1: 8-bit data, FIFO threshold = 1 byte
-     * DSIZE[4:0] = 7 → 8-bit frames
-     * FTHLV[1:0] = 0 → threshold de 1 data (RXP activo con 1 byte) */
-    spi->CFG1 = (7U << SPI_CFG1_DSIZE_Pos)
-              | (0U << SPI_CFG1_FTHLV_Pos);
-
-    /* CFG2: TODO en 0 → configuración por defecto ideal para slave:
-     *   MASTER=0 (slave), CPOL=0, CPHA=0, LSBFRST=0 (MSB first),
-     *   SSM=0 (hardware NSS), SSOE=0 (NSS input en slave),
-     *   SSOM=0, SSIOP=0 (NSS active low), SP=0 (Motorola/SPI),
-     *   COMM=00 (full duplex), MIDI=0, MSSI=0                      */
-    spi->CFG2 = 0;
-
-    /* Limpiar todos los flags */
-    spi->IFCR = 0xFFFFFFFF;
-
-    /* TSIZE = 0 → modo continuo (no EOT automático) */
-    spi->CR2 = 0;
-
-    /* Enable SPI */
-    spi->CR1 |= SPI_CR1_SPE;
-}
-
-/* ── Recibir una transacción completa (CS LOW → bytes → CS HIGH) ─ */
-static uint16_t SpiSlaveReceive(uint8_t* buf, uint16_t maxLen)
-{
-    SPI_TypeDef* spi = SPI1;
-    uint16_t idx = 0;
-
-    /* Esperar hasta que CS baje (con timeout) */
-    uint32_t t0 = hw.system.GetNow();
-    while(SPI_CS_IS_HIGH()){
-        if((hw.system.GetNow() - t0) > 100) return 0;  /* 100ms timeout */
-    }
-
-    /* CS está LOW — leer bytes mientras CS sigue LOW */
-    while(SPI_CS_IS_LOW())
-    {
-        /* ¿Hay datos en el FIFO RX? (RXPLVL o RXP flag) */
-        if(spi->SR & SPI_SR_RXP)
-        {
-            if(idx < maxLen)
-                buf[idx++] = *(volatile uint8_t*)&spi->RXDR;
-            else
-                (void)*(volatile uint8_t*)&spi->RXDR;  /* discard overflow */
-        }
-    }
-
-    /* CS subió — vaciar FIFO residual (bytes que llegaron justo al final) */
-    for(int drain = 0; drain < 16 && (spi->SR & SPI_SR_RXP); drain++)
-    {
-        if(idx < maxLen)
-            buf[idx++] = *(volatile uint8_t*)&spi->RXDR;
-        else
-            (void)*(volatile uint8_t*)&spi->RXDR;
-    }
-
-    /* Limpiar flags para la próxima transacción */
-    spi->IFCR = SPI_IFCR_OVRC | SPI_IFCR_UDRC | SPI_IFCR_TXTFC
-              | SPI_IFCR_EOTC | SPI_IFCR_SUSPC;
-
-    return idx;
-}
-
-/* ── Enviar respuesta completa (esperar 2da transacción CS + TX) ── */
-static bool SpiSlaveSendResponse(uint16_t len, uint16_t timeoutMs)
-{
-    SPI_TypeDef* spi = SPI1;
-
-    /* 1. Reset SPI para limpiar estado de RX anterior */
-    spi->CR1 &= ~SPI_CR1_SPE;
-    spi->IFCR = 0xFFFFFFFF;
-    spi->CR2  = 0;  /* TSIZE=0 → continuo */
-
-    /* 2. Pre-cargar TX FIFO (hasta 16 bytes) antes de habilitar SPI.
-     *    Así cuando el master baje CS y clockee, los primeros bytes
-     *    ya están listos en MISO sin latencia.                       */
-    uint16_t txIdx = 0;
-    spi->CR1 |= SPI_CR1_SPE;
-
-    uint16_t preload = (len < 16) ? len : 16;
-    for(uint16_t i = 0; i < preload; i++)
-    {
-        uint32_t guard = 0;
-        while(!(spi->SR & SPI_SR_TXP) && ++guard < 100000) {}
-        *(volatile uint8_t*)&spi->TXDR = txBuf[txIdx++];
-    }
-
-    /* 3. Esperar CS LOW (master inicia segunda transacción) */
-    uint32_t t0 = hw.system.GetNow();
-    while(SPI_CS_IS_HIGH()){
-        if((hw.system.GetNow() - t0) > timeoutMs) return false;
-    }
-
-    /* 4. CS está LOW — el master clockea. Alimentar TX FIFO con
-     *    bytes restantes y drenar RX FIFO simultáneamente.          */
-    while(SPI_CS_IS_LOW())
-    {
-        /* Alimentar TX si hay más bytes por enviar */
-        if(txIdx < len && (spi->SR & SPI_SR_TXP))
-        {
-            *(volatile uint8_t*)&spi->TXDR = txBuf[txIdx++];
-        }
-        /* Drenar RX (master envía 0xFF dummies) */
-        if(spi->SR & SPI_SR_RXP)
-        {
-            (void)*(volatile uint8_t*)&spi->RXDR;
-        }
-    }
-
-    /* 5. CS HIGH — drenar residual */
-    for(int d = 0; d < 16; d++)
-    {
-        if(spi->SR & SPI_SR_RXP)
-            (void)*(volatile uint8_t*)&spi->RXDR;
-    }
-
-    spi->IFCR = 0xFFFFFFFF;
-    return true;
-}
-
-/* ── Reset SPI para próxima recepción ─────────────────────────── */
-static void SpiSlaveResetForRx()
-{
-    SPI_TypeDef* spi = SPI1;
-    spi->CR1 &= ~SPI_CR1_SPE;
-    spi->IFCR = 0xFFFFFFFF;
-    spi->CR2 = 0;
-    spi->CR1 |= SPI_CR1_SPE;
+    /* Iniciar TIM6 para drenar RXFIFO cada ~50µs al ring buffer */
+    InitSpiDrainTimer();
 }
 
 /* ═══════════════════════════════════════════════════════════════════
@@ -4307,9 +4251,9 @@ int main()
             hw.PrintLine(fmt, args...);
     };
 
-    /* USB serial debug */
+    /* USB serial debug (false = no bloquear esperando terminal) */
     if(kEnableStartLog)
-        hw.StartLog(true);
+        hw.StartLog(false);
     Log("══════════════════════════════════════════");
     Log("  RED808 DrumMachine — Daisy Seed Slave");
     Log("  %d pads · %d voices · %d Hz · %d block",
@@ -4463,6 +4407,17 @@ int main()
     {
         Log("Iniciando audio @ %d Hz, %d samples/block", SAMPLE_RATE, AUDIO_BLOCK);
         hw.StartAudio(AudioCallback);
+
+        /* ── Override NVIC: bajar prioridad DMA audio para que TIM6 pueda
+         *    preemptar el AudioCallback y drenar SPI FIFO.
+         *    libdaisy pone todo a (0,0).  Nosotros:
+         *      DMA1_Stream0 (SAI1_A) → 2   (audio)
+         *      DMA1_Stream1 (SAI1_B) → 2   (audio)
+         *      TIM6_DAC               → 1   (SPI drain – preempta audio)
+         *    Además el AudioCallback drena inline cada 4 samples.        */
+        NVIC_SetPriority(DMA1_Stream0_IRQn, 2);
+        NVIC_SetPriority(DMA1_Stream1_IRQn, 2);
+        Log("NVIC override: DMA1_S0/S1→prio2, TIM6→prio1");
     }
     else
     {
@@ -4479,83 +4434,65 @@ int main()
     /* ── Main loop ── */
     while(1){
 
-        /* ━━━━━ SPI1 slave transport — POLLING ━━━━━
-         * Sin DMA, sin EXTI. Leemos NSS (CS) pin directamente.
-         * TIMING CRÍTICO: El audio callback (cada 2.67ms) puede preemptar
-         * el código entre TX1 y TX2. Para garantizar que se carga el FIFO
-         * TX dentro de la ventana del master (8ms), usamos __disable_irq()
-         * durante el proceso + preload. El window es < 20µs → seguro.     */
+        /* ━━━━━ SPI1 slave transport — RX via ring buffer (ISR) ━━━━━
+         * SPI1_IRQHandler drena RXFIFO al ring buffer en tiempo real.
+         * Aquí procesamos los bytes acumulados sin riesgo de OVR.
+         * TX sigue por polling (TXFIFO se carga entre transacciones). */
         if(kEnableSpiSlave && kUseSpiTransport)
         {
-            /* Recibir primera transacción (bloquea con 100ms timeout) */
-            uint16_t rxLen = SpiSlaveReceive(rxBuf, RX_BUF_SIZE);
-            if(rxLen >= 8)
+            /* Limpiar EOT si quedó de la transacción anterior */
+            if(SPI1->SR & SPI_SR_EOT)
+                SPI1->IFCR = SPI_IFCR_EOTC | SPI_IFCR_TXTFC;
+
+            /* ── RX: leer bytes del ring buffer (llenado por ISR) ── */
+            while(spiRingTail != spiRingHead)
             {
-                SPIPacketHeader* hdr = (SPIPacketHeader*)rxBuf;
-                if(hdr->magic == SPI_MAGIC_CMD &&
-                   rxLen >= (uint16_t)(8 + hdr->length))
-                {
-                    spiSlvIsrCnt++;
-                    uartLedPulseUntilMs = hw.system.GetNow() + 60;
-                    if(demoModeActive){ demoModeActive = false; }
+                uint8_t b = spiRing[spiRingTail];
+                spiRingTail = (spiRingTail + 1) & SPI_RING_MASK;
 
-                    /* ── SECCIÓN CRÍTICA: process + preload TX FIFO ──
-                     * IRQs deshabilitadas ~10µs para garantizar que el
-                     * TX FIFO esté listo antes de que el master baje CS
-                     * (gap de 8ms entre TX1 y TX2 en ESP32).            */
-                    __disable_irq();
-                    ProcessCommand();
-                    bool doTx = pendingResponse;
-                    uint16_t txLen = pendingTxLen;
-                    if(doTx)
-                    {
-                        pendingResponse = false;
-                        /* Pre-armar TX: reset SPI + preload FIFO ahora */
-                        SPI_TypeDef* spi = SPI1;
-                        spi->CR1 &= ~SPI_CR1_SPE;
-                        spi->IFCR = 0xFFFFFFFF;
-                        spi->CR2  = 0;
-                        spi->CR1 |= SPI_CR1_SPE;
-                        uint16_t preload = (txLen < 16) ? txLen : 16;
-                        for(uint16_t i = 0; i < preload; i++)
-                        {
-                            uint32_t g = 0;
-                            while(!(spi->SR & SPI_SR_TXP) && ++g < 10000){}
-                            *(volatile uint8_t*)&spi->TXDR = txBuf[i];
+                if(parseIdx == 0) {
+                    if(b == SPI_MAGIC_CMD) parseBuf[parseIdx++] = b;
+                } else {
+                    if(parseIdx < RX_BUF_SIZE) parseBuf[parseIdx++] = b;
+                    if(parseIdx >= 8) {
+                        SPIPacketHeader* hdr = (SPIPacketHeader*)parseBuf;
+                        uint16_t targetLen = 8u + hdr->length;
+                        if(targetLen > RX_BUF_SIZE) { parseIdx = 0; }
+                        else if(parseIdx == targetLen) {
+                            /* Paquete completo */
+                            memcpy(rxBuf, parseBuf, targetLen);
+                            parseIdx = 0;
+
+                            spiSlvIsrCnt++;
+                            uartLedPulseUntilMs = hw.system.GetNow() + 60;
+                            if(demoModeActive) demoModeActive = false;
+
+                            ProcessCommand();
+
+                            if(pendingResponse) {
+                                pendingResponse = false;
+                                spiTxPending    = true;
+                                spiTxIdx        = 0;
+                                /* Limpiar EOT+TXTF para que TXP funcione */
+                                SPI1->IFCR = SPI_IFCR_EOTC | SPI_IFCR_TXTFC;
+                                /* Pre-cargar TXFIFO inmediatamente */
+                                while((SPI1->SR & SPI_SR_TXP) && spiTxIdx < pendingTxLen)
+                                    *(volatile uint8_t*)&SPI1->TXDR = txBuf[spiTxIdx++];
+                                if(spiTxIdx >= pendingTxLen) spiTxPending = false;
+                            }
                         }
                     }
-                    __enable_irq();
-                    /* ── FIN SECCIÓN CRÍTICA ── */
+                }
+            }
 
-                    if(doTx)
-                    {
-                        /* Esperar CS LOW (segunda transacción) + drenar TX
-                         * residual. IRQs habilitadas → audio puede correr.  */
-                        uint32_t t0 = hw.system.GetNow();
-                        while(SPI_CS_IS_HIGH()){
-                            if((hw.system.GetNow() - t0) > 10) break;
-                        }
-                        uint16_t txIdx2 = (txLen < 16) ? txLen : 16;
-                        while(SPI_CS_IS_LOW())
-                        {
-                            if(txIdx2 < txLen && (SPI1->SR & SPI_SR_TXP))
-                                *(volatile uint8_t*)&SPI1->TXDR = txBuf[txIdx2++];
-                            if(SPI1->SR & SPI_SR_RXP)
-                                (void)*(volatile uint8_t*)&SPI1->RXDR;
-                        }
-                        for(int d = 0; d < 16; d++){
-                            if(SPI1->SR & SPI_SR_RXP)
-                                (void)*(volatile uint8_t*)&SPI1->RXDR;
-                        }
-                        SPI1->IFCR = 0xFFFFFFFF;
-                    }
-                    SpiSlaveResetForRx();
-                }
-                else
+            /* ── TX: cargar TXFIFO mientras haya espacio y bytes pendientes ── */
+            if(spiTxPending)
+            {
+                while((SPI1->SR & SPI_SR_TXP) && spiTxIdx < pendingTxLen)
                 {
-                    spiErrCnt++;
-                    SpiSlaveResetForRx();
+                    *(volatile uint8_t*)&SPI1->TXDR = txBuf[spiTxIdx++];
                 }
+                if(spiTxIdx >= pendingTxLen) spiTxPending = false;
             }
         }
 

@@ -1,0 +1,101 @@
+mkdir build
+arm-none-eabi-gcc -c -mcpu=cortex-m7 -mthumb -mfpu=fpv5-d16 -mfloat-abi=hard -DUSE_HAL_DRIVER -DSTM32H750xx -DHSE_VALUE=16000000  -DCORE_CM7 -DSTM32H750IB -DARM_MATH_CM7 -DUSE_FULL_LL_DRIVER -DFILEIO_ENABLE_FATFS_READER -DBOOT_APP -I. -I./DaisySP/DaisySP-LGPL/Source -include stm32h7xx.h -I./libdaisy -I./libdaisy/src/ -I./libdaisy/src/sys -I./libdaisy/src/usbd -I./libdaisy/src/usbh -I./libdaisy/Drivers/CMSIS_5/CMSIS/Core/Include/ -I./libdaisy/Drivers/CMSIS-DSP/Include -I./libdaisy/Drivers/CMSIS-Device/ST/STM32H7xx/Include -I./libdaisy/Drivers/STM32H7xx_HAL_Driver/Inc/ -I./libdaisy/Middlewares/ST/STM32_USB_Device_Library/Core/Inc -I./libdaisy/Middlewares/ST/STM32_USB_Host_Library/Core/Inc -I./libdaisy/Middlewares/ST/STM32_USB_Host_Library/Class/MSC/Inc -I./libdaisy/Middlewares/ST/STM32_USB_Host_Library/Class/MIDI/Inc -I./libdaisy/core/ -I./DaisySP/Source -I./libdaisy/Middlewares/Third_Party/FatFs/src -O2 -Wall -Wno-missing-attributes -fasm -fdata-sections -ffunction-sections -Wno-stringop-overflow -g -ggdb -MMD -MP -MF"build/startup_stm32h750xx.d" -std=gnu11 -Wa,-a,-ad,-alms=build/startup_stm32h750xx.lst ./libdaisy/core/startup_stm32h750xx.c -o build/startup_stm32h750xx.o
+arm-none-eabi-g++ -c -mcpu=cortex-m7 -mthumb -mfpu=fpv5-d16 -mfloat-abi=hard -DUSE_HAL_DRIVER -DSTM32H750xx -DHSE_VALUE=16000000  -DCORE_CM7 -DSTM32H750IB -DARM_MATH_CM7 -DUSE_FULL_LL_DRIVER -DFILEIO_ENABLE_FATFS_READER -DBOOT_APP -I. -I./DaisySP/DaisySP-LGPL/Source -include stm32h7xx.h -I./libdaisy -I./libdaisy/src/ -I./libdaisy/src/sys -I./libdaisy/src/usbd -I./libdaisy/src/usbh -I./libdaisy/Drivers/CMSIS_5/CMSIS/Core/Include/ -I./libdaisy/Drivers/CMSIS-DSP/Include -I./libdaisy/Drivers/CMSIS-Device/ST/STM32H7xx/Include -I./libdaisy/Drivers/STM32H7xx_HAL_Driver/Inc/ -I./libdaisy/Middlewares/ST/STM32_USB_Device_Library/Core/Inc -I./libdaisy/Middlewares/ST/STM32_USB_Host_Library/Core/Inc -I./libdaisy/Middlewares/ST/STM32_USB_Host_Library/Class/MSC/Inc -I./libdaisy/Middlewares/ST/STM32_USB_Host_Library/Class/MIDI/Inc -I./libdaisy/core/ -I./DaisySP/Source -I./libdaisy/Middlewares/Third_Party/FatFs/src -O2 -Wall -Wno-missing-attributes -fasm -fdata-sections -ffunction-sections -Wno-stringop-overflow -g -ggdb -MMD -MP -MF"build/main.d" -fno-exceptions -fasm -finline -finline-functions-called-once -fshort-enums -fno-move-loop-invariants -fno-unwind-tables -fno-rtti -Wno-register -std=gnu++14 -Wa,-a,-ad,-alms=build/main.lst main.cpp -o build/main.o
+./libdaisy/core/startup_stm32h750xx.c:1561:1: warning: FP registers might be clobbered despite 'interrupt' attribute: compile with '-mgeneral-regs-only' [-Wattributes]
+ 1561 | {
+      | ^
+main.cpp: In function 'void AudioCallback(daisy::AudioHandle::InputBuffer, daisy::AudioHandle::OutputBuffer, size_t)':
+main.cpp:1955:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+ 1955 |                 if(d==0) d=1; if(d>=TRACK_ECHO_SIZE) d=TRACK_ECHO_SIZE-1;
+      |                 ^~
+main.cpp:1955:31: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+ 1955 |                 if(d==0) d=1; if(d>=TRACK_ECHO_SIZE) d=TRACK_ECHO_SIZE-1;
+      |                               ^~
+main.cpp: In function 'void ProcessCommand()':
+main.cpp:3464:33: warning: variable 'tmpHdr' set but not used [-Wunused-but-set-variable]
+ 3464 |                 SPIPacketHeader tmpHdr;
+      |                                 ^~~~~~
+main.cpp: In function 'int main()':
+main.cpp:4256:10: warning: unused variable 'sdOk' [-Wunused-variable]
+ 4256 |     bool sdOk = false;
+      |          ^~~~
+main.cpp: At global scope:
+main.cpp:3860:13: warning: 'void AutoLoadFromSD()' defined but not used [-Wunused-function]
+ 3860 | static void AutoLoadFromSD()
+      |             ^~~~~~~~~~~~~~
+main.cpp:3638:13: warning: 'bool InitSD()' defined but not used [-Wunused-function]
+ 3638 | static bool InitSD()
+      |             ^~~~~~
+main.cpp:3499:17: warning: 'rxReadPtr' defined but not used [-Wunused-variable]
+ 3499 | static uint16_t rxReadPtr = 0;
+      |                 ^~~~~~~~~
+main.cpp:3498:17: warning: 'parseIdx' defined but not used [-Wunused-variable]
+ 3498 | static uint16_t parseIdx = 0;
+      |                 ^~~~~~~~
+main.cpp:3497:17: warning: 'parseBuf' defined but not used [-Wunused-variable]
+ 3497 | static uint8_t  parseBuf[RX_BUF_SIZE];
+      |                 ^~~~~~~~
+main.cpp:53:27: warning: 'hdma_spi1_tx' defined but not used [-Wunused-variable]
+   53 | static DMA_HandleTypeDef  hdma_spi1_tx;
+      |                           ^~~~~~~~~~~~
+main.cpp:52:27: warning: 'hdma_spi1_rx' defined but not used [-Wunused-variable]
+   52 | static DMA_HandleTypeDef  hdma_spi1_rx;
+      |                           ^~~~~~~~~~~~
+main.cpp: In function 'void ProcessCommand()':
+main.cpp:3205:16: warning: 'char* strncpy(char*, const char*, size_t)' output may be truncated copying 31 bytes from a string of length 31 [-Wstringop-truncation]
+ 3205 |         strncpy((char*)(resp + 14), currentKitName, 31);
+      |         ~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+main.cpp:3035:16: warning: 'char* strncpy(char*, const char*, size_t)' output may be truncated copying 31 bytes from a string of length 31 [-Wstringop-truncation]
+ 3035 |         strncpy(resp.currentKit, currentKitName, 31);
+      |         ~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+main.cpp:3001:60: warning: '%s' directive output may be truncated writing up to 255 bytes into a region of size between 64 and 159 [-Wformat-truncation=]
+ 3001 |                         snprintf(fpath, sizeof(fpath), "%s/%s", path, fno.fname);
+      |                                                            ^~         ~~~~~~~~~
+main.cpp:3001:33: note: 'snprintf' output between 2 and 352 bytes into a destination of size 160
+ 3001 |                         snprintf(fpath, sizeof(fpath), "%s/%s", path, fno.fname);
+      |                         ~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+main.cpp:2991:60: warning: '%s' directive output may be truncated writing up to 255 bytes into a region of size between 64 and 159 [-Wformat-truncation=]
+ 2991 |                         snprintf(fpath, sizeof(fpath), "%s/%s", path, fno.fname);
+      |                                                            ^~         ~~~~~~~~~
+main.cpp:2991:33: note: 'snprintf' output between 2 and 352 bytes into a destination of size 160
+ 2991 |                         snprintf(fpath, sizeof(fpath), "%s/%s", path, fno.fname);
+      |                         ~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+main.cpp:3012:24: warning: 'char* strncpy(char*, const char*, size_t)' output may be truncated copying 31 bytes from a string of length 31 [-Wstringop-truncation]
+ 3012 |                 strncpy(currentKitName, lk.kitName, 31);
+      |                 ~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+main.cpp:3066:28: warning: 'char* strncpy(char*, const char*, size_t)' output may be truncated copying 31 bytes from a string of length 255 [-Wstringop-truncation]
+ 3066 |                     strncpy(resp.kits[resp.count], fno.fname, 31);
+      |                     ~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+arm-none-eabi-g++ build/startup_stm32h750xx.o build/main.o  -mcpu=cortex-m7 -mthumb -mfpu=fpv5-d16 -mfloat-abi=hard --specs=nano.specs --specs=nosys.specs -T./libdaisy/core/STM32H750IB_sram.lds -L./DaisySP/DaisySP-LGPL/build -L./libdaisy/build -L ./DaisySP/build -ldaisysp-lgpl -ldaisy -lc -lm -lnosys -ldaisysp -Wl,-Map=build/DrumMachine.map,--cref -Wl,--gc-sections -Wl,--print-memory-usage -o build/DrumMachine.elf
+C:/ST/STM32CubeIDE_2.0.0/STM32CubeIDE/plugins/com.st.stm32cube.ide.mcu.externaltools.gnu-tools-for-stm32.13.3.rel1.win32_1.0.100.202509120712/tools/bin/../lib/gcc/arm-none-eabi/13.3.1/../../../../arm-none-eabi/bin/ld.exe: C:/ST/STM32CubeIDE_2.0.0/STM32CubeIDE/plugins/com.st.stm32cube.ide.mcu.externaltools.gnu-tools-for-stm32.13.3.rel1.win32_1.0.100.202509120712/tools/bin/../lib/gcc/arm-none-eabi/13.3.1/../../../../arm-none-eabi/lib/thumb/v7e-m+dp/hard\libc_nano.a(libc_a-closer.o): in function `_close_r':
+(.text._close_r+0xc): warning: _close is not implemented and will always fail
+C:/ST/STM32CubeIDE_2.0.0/STM32CubeIDE/plugins/com.st.stm32cube.ide.mcu.externaltools.gnu-tools-for-stm32.13.3.rel1.win32_1.0.100.202509120712/tools/bin/../lib/gcc/arm-none-eabi/13.3.1/../../../../arm-none-eabi/bin/ld.exe: C:/ST/STM32CubeIDE_2.0.0/STM32CubeIDE/plugins/com.st.stm32cube.ide.mcu.externaltools.gnu-tools-for-stm32.13.3.rel1.win32_1.0.100.202509120712/tools/bin/../lib/gcc/arm-none-eabi/13.3.1/../../../../arm-none-eabi/lib/thumb/v7e-m+dp/hard\libc_nano.a(libc_a-closer.o): note: the message above does not take linker garbage collection into account
+C:/ST/STM32CubeIDE_2.0.0/STM32CubeIDE/plugins/com.st.stm32cube.ide.mcu.externaltools.gnu-tools-for-stm32.13.3.rel1.win32_1.0.100.202509120712/tools/bin/../lib/gcc/arm-none-eabi/13.3.1/../../../../arm-none-eabi/bin/ld.exe: C:/ST/STM32CubeIDE_2.0.0/STM32CubeIDE/plugins/com.st.stm32cube.ide.mcu.externaltools.gnu-tools-for-stm32.13.3.rel1.win32_1.0.100.202509120712/tools/bin/../lib/gcc/arm-none-eabi/13.3.1/../../../../arm-none-eabi/lib/thumb/v7e-m+dp/hard\libc_nano.a(libc_a-fstatr.o): in function `_fstat_r':
+(.text._fstat_r+0xe): warning: _fstat is not implemented and will always fail
+C:/ST/STM32CubeIDE_2.0.0/STM32CubeIDE/plugins/com.st.stm32cube.ide.mcu.externaltools.gnu-tools-for-stm32.13.3.rel1.win32_1.0.100.202509120712/tools/bin/../lib/gcc/arm-none-eabi/13.3.1/../../../../arm-none-eabi/bin/ld.exe: C:/ST/STM32CubeIDE_2.0.0/STM32CubeIDE/plugins/com.st.stm32cube.ide.mcu.externaltools.gnu-tools-for-stm32.13.3.rel1.win32_1.0.100.202509120712/tools/bin/../lib/gcc/arm-none-eabi/13.3.1/../../../../arm-none-eabi/lib/thumb/v7e-m+dp/hard\libc_nano.a(libc_a-fstatr.o): note: the message above does not take linker garbage collection into account
+C:/ST/STM32CubeIDE_2.0.0/STM32CubeIDE/plugins/com.st.stm32cube.ide.mcu.externaltools.gnu-tools-for-stm32.13.3.rel1.win32_1.0.100.202509120712/tools/bin/../lib/gcc/arm-none-eabi/13.3.1/../../../../arm-none-eabi/bin/ld.exe: C:/ST/STM32CubeIDE_2.0.0/STM32CubeIDE/plugins/com.st.stm32cube.ide.mcu.externaltools.gnu-tools-for-stm32.13.3.rel1.win32_1.0.100.202509120712/tools/bin/../lib/gcc/arm-none-eabi/13.3.1/../../../../arm-none-eabi/lib/thumb/v7e-m+dp/hard\libc_nano.a(libc_a-isattyr.o): in function `_isatty_r':
+(.text._isatty_r+0xc): warning: _isatty is not implemented and will always fail
+C:/ST/STM32CubeIDE_2.0.0/STM32CubeIDE/plugins/com.st.stm32cube.ide.mcu.externaltools.gnu-tools-for-stm32.13.3.rel1.win32_1.0.100.202509120712/tools/bin/../lib/gcc/arm-none-eabi/13.3.1/../../../../arm-none-eabi/bin/ld.exe: C:/ST/STM32CubeIDE_2.0.0/STM32CubeIDE/plugins/com.st.stm32cube.ide.mcu.externaltools.gnu-tools-for-stm32.13.3.rel1.win32_1.0.100.202509120712/tools/bin/../lib/gcc/arm-none-eabi/13.3.1/../../../../arm-none-eabi/lib/thumb/v7e-m+dp/hard\libc_nano.a(libc_a-isattyr.o): note: the message above does not take linker garbage collection into account
+C:/ST/STM32CubeIDE_2.0.0/STM32CubeIDE/plugins/com.st.stm32cube.ide.mcu.externaltools.gnu-tools-for-stm32.13.3.rel1.win32_1.0.100.202509120712/tools/bin/../lib/gcc/arm-none-eabi/13.3.1/../../../../arm-none-eabi/bin/ld.exe: C:/ST/STM32CubeIDE_2.0.0/STM32CubeIDE/plugins/com.st.stm32cube.ide.mcu.externaltools.gnu-tools-for-stm32.13.3.rel1.win32_1.0.100.202509120712/tools/bin/../lib/gcc/arm-none-eabi/13.3.1/../../../../arm-none-eabi/lib/thumb/v7e-m+dp/hard\libc_nano.a(libc_a-lseekr.o): in function `_lseek_r':
+(.text._lseek_r+0x10): warning: _lseek is not implemented and will always fail
+C:/ST/STM32CubeIDE_2.0.0/STM32CubeIDE/plugins/com.st.stm32cube.ide.mcu.externaltools.gnu-tools-for-stm32.13.3.rel1.win32_1.0.100.202509120712/tools/bin/../lib/gcc/arm-none-eabi/13.3.1/../../../../arm-none-eabi/bin/ld.exe: C:/ST/STM32CubeIDE_2.0.0/STM32CubeIDE/plugins/com.st.stm32cube.ide.mcu.externaltools.gnu-tools-for-stm32.13.3.rel1.win32_1.0.100.202509120712/tools/bin/../lib/gcc/arm-none-eabi/13.3.1/../../../../arm-none-eabi/lib/thumb/v7e-m+dp/hard\libc_nano.a(libc_a-lseekr.o): note: the message above does not take linker garbage collection into account
+C:/ST/STM32CubeIDE_2.0.0/STM32CubeIDE/plugins/com.st.stm32cube.ide.mcu.externaltools.gnu-tools-for-stm32.13.3.rel1.win32_1.0.100.202509120712/tools/bin/../lib/gcc/arm-none-eabi/13.3.1/../../../../arm-none-eabi/bin/ld.exe: C:/ST/STM32CubeIDE_2.0.0/STM32CubeIDE/plugins/com.st.stm32cube.ide.mcu.externaltools.gnu-tools-for-stm32.13.3.rel1.win32_1.0.100.202509120712/tools/bin/../lib/gcc/arm-none-eabi/13.3.1/../../../../arm-none-eabi/lib/thumb/v7e-m+dp/hard\libc_nano.a(libc_a-readr.o): in function `_read_r':
+(.text._read_r+0x10): warning: _read is not implemented and will always fail
+C:/ST/STM32CubeIDE_2.0.0/STM32CubeIDE/plugins/com.st.stm32cube.ide.mcu.externaltools.gnu-tools-for-stm32.13.3.rel1.win32_1.0.100.202509120712/tools/bin/../lib/gcc/arm-none-eabi/13.3.1/../../../../arm-none-eabi/bin/ld.exe: C:/ST/STM32CubeIDE_2.0.0/STM32CubeIDE/plugins/com.st.stm32cube.ide.mcu.externaltools.gnu-tools-for-stm32.13.3.rel1.win32_1.0.100.202509120712/tools/bin/../lib/gcc/arm-none-eabi/13.3.1/../../../../arm-none-eabi/lib/thumb/v7e-m+dp/hard\libc_nano.a(libc_a-readr.o): note: the message above does not take linker garbage collection into account
+C:/ST/STM32CubeIDE_2.0.0/STM32CubeIDE/plugins/com.st.stm32cube.ide.mcu.externaltools.gnu-tools-for-stm32.13.3.rel1.win32_1.0.100.202509120712/tools/bin/../lib/gcc/arm-none-eabi/13.3.1/../../../../arm-none-eabi/bin/ld.exe: C:/ST/STM32CubeIDE_2.0.0/STM32CubeIDE/plugins/com.st.stm32cube.ide.mcu.externaltools.gnu-tools-for-stm32.13.3.rel1.win32_1.0.100.202509120712/tools/bin/../lib/gcc/arm-none-eabi/13.3.1/../../../../arm-none-eabi/lib/thumb/v7e-m+dp/hard\libc_nano.a(libc_a-writer.o): in function `_write_r':
+(.text._write_r+0x10): warning: _write is not implemented and will always fail
+C:/ST/STM32CubeIDE_2.0.0/STM32CubeIDE/plugins/com.st.stm32cube.ide.mcu.externaltools.gnu-tools-for-stm32.13.3.rel1.win32_1.0.100.202509120712/tools/bin/../lib/gcc/arm-none-eabi/13.3.1/../../../../arm-none-eabi/bin/ld.exe: warning: build/DrumMachine.elf has a LOAD segment with RWX permissions
+C:/ST/STM32CubeIDE_2.0.0/STM32CubeIDE/plugins/com.st.stm32cube.ide.mcu.externaltools.gnu-tools-for-stm32.13.3.rel1.win32_1.0.100.202509120712/tools/bin/../lib/gcc/arm-none-eabi/13.3.1/../../../../arm-none-eabi/bin/ld.exe: C:/ST/STM32CubeIDE_2.0.0/STM32CubeIDE/plugins/com.st.stm32cube.ide.mcu.externaltools.gnu-tools-for-stm32.13.3.rel1.win32_1.0.100.202509120712/tools/bin/../lib/gcc/arm-none-eabi/13.3.1/../../../../arm-none-eabi/lib/thumb/v7e-m+dp/hard\libc_nano.a(libc_a-writer.o): note: the message above does not take linker garbage collection into account
+Memory region         Used Size  Region Size  %age Used
+           FLASH:           0 B       128 KB      0.00%
+         DTCMRAM:       28752 B       128 KB     21.94%
+            SRAM:      156324 B       480 KB     31.80%
+      RAM_D2_DMA:       18676 B        32 KB     56.99%
+          RAM_D2:           0 B       256 KB      0.00%
+          RAM_D3:           0 B        64 KB      0.00%
+     BACKUP_SRAM:          12 B         4 KB      0.29%
+         ITCMRAM:           0 B        64 KB      0.00%
+           SDRAM:     6619188 B        64 MB      9.86%
+       QSPIFLASH:           0 B      7936 KB      0.00%
+arm-none-eabi-objcopy -O ihex build/DrumMachine.elf build/DrumMachine.hex
+arm-none-eabi-objcopy -O binary -S build/DrumMachine.elf build/DrumMachine.bin

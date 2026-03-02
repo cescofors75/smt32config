@@ -1,0 +1,43 @@
+arm-none-eabi-g++ -c -mcpu=cortex-m7 -mthumb -mfpu=fpv5-d16 -mfloat-abi=hard -DUSE_HAL_DRIVER -DSTM32H750xx -DHSE_VALUE=16000000  -DCORE_CM7 -DSTM32H750IB -DARM_MATH_CM7 -DUSE_FULL_LL_DRIVER -DFILEIO_ENABLE_FATFS_READER -DBOOT_APP -I. -I./DaisySP/DaisySP-LGPL/Source -include stm32h7xx.h -I./libdaisy -I./libdaisy/src/ -I./libdaisy/src/sys -I./libdaisy/src/usbd -I./libdaisy/src/usbh -I./libdaisy/Drivers/CMSIS_5/CMSIS/Core/Include/ -I./libdaisy/Drivers/CMSIS-DSP/Include -I./libdaisy/Drivers/CMSIS-Device/ST/STM32H7xx/Include -I./libdaisy/Drivers/STM32H7xx_HAL_Driver/Inc/ -I./libdaisy/Middlewares/ST/STM32_USB_Device_Library/Core/Inc -I./libdaisy/Middlewares/ST/STM32_USB_Host_Library/Core/Inc -I./libdaisy/Middlewares/ST/STM32_USB_Host_Library/Class/MSC/Inc -I./libdaisy/Middlewares/ST/STM32_USB_Host_Library/Class/MIDI/Inc -I./libdaisy/core/ -I./DaisySP/Source -I./libdaisy/Middlewares/Third_Party/FatFs/src -O2 -Wall -Wno-missing-attributes -fasm -fdata-sections -ffunction-sections -Wno-stringop-overflow -g -ggdb -MMD -MP -MF"build/main.d" -fno-exceptions -fasm -finline -finline-functions-called-once -fshort-enums -fno-move-loop-invariants -fno-unwind-tables -fno-rtti -Wno-register -std=gnu++14 -Wa,-a,-ad,-alms=build/main.lst main.cpp -o build/main.o
+main.cpp: In function 'void AudioCallback(daisy::AudioHandle::InputBuffer, daisy::AudioHandle::OutputBuffer, size_t)':
+main.cpp:1955:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+ 1955 |                 if(d==0) d=1; if(d>=TRACK_ECHO_SIZE) d=TRACK_ECHO_SIZE-1;
+      |                 ^~
+main.cpp:1955:31: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+ 1955 |                 if(d==0) d=1; if(d>=TRACK_ECHO_SIZE) d=TRACK_ECHO_SIZE-1;
+      |                               ^~
+main.cpp: In function 'void ProcessCommand()':
+main.cpp:3464:33: warning: variable 'tmpHdr' set but not used [-Wunused-but-set-variable]
+ 3464 |                 SPIPacketHeader tmpHdr;
+      |                                 ^~~~~~
+main.cpp: In function 'int main()':
+main.cpp:4341:40: error: 'SPI_MAX_PAYLOAD' was not declared in this scope; did you mean 'ETH_MAX_PAYLOAD'?
+ 4341 |                        hdr->length <= (SPI_MAX_PAYLOAD - (uint16_t)sizeof(SPIPacketHeader)))
+      |                                        ^~~~~~~~~~~~~~~
+      |                                        ETH_MAX_PAYLOAD
+main.cpp:4256:10: warning: unused variable 'sdOk' [-Wunused-variable]
+ 4256 |     bool sdOk = false;
+      |          ^~~~
+main.cpp: At global scope:
+main.cpp:3860:13: warning: 'void AutoLoadFromSD()' defined but not used [-Wunused-function]
+ 3860 | static void AutoLoadFromSD()
+      |             ^~~~~~~~~~~~~~
+main.cpp:3638:13: warning: 'bool InitSD()' defined but not used [-Wunused-function]
+ 3638 | static bool InitSD()
+      |             ^~~~~~
+main.cpp:3499:17: warning: 'rxReadPtr' defined but not used [-Wunused-variable]
+ 3499 | static uint16_t rxReadPtr = 0;
+      |                 ^~~~~~~~~
+main.cpp:3498:17: warning: 'parseIdx' defined but not used [-Wunused-variable]
+ 3498 | static uint16_t parseIdx = 0;
+      |                 ^~~~~~~~
+main.cpp:3497:17: warning: 'parseBuf' defined but not used [-Wunused-variable]
+ 3497 | static uint8_t  parseBuf[RX_BUF_SIZE];
+      |                 ^~~~~~~~
+main.cpp:53:27: warning: 'hdma_spi1_tx' defined but not used [-Wunused-variable]
+   53 | static DMA_HandleTypeDef  hdma_spi1_tx;
+      |                           ^~~~~~~~~~~~
+main.cpp:52:27: warning: 'hdma_spi1_rx' defined but not used [-Wunused-variable]
+   52 | static DMA_HandleTypeDef  hdma_spi1_rx;
+      |                           ^~~~~~~~~~~~
+make: *** [libdaisy/core/Makefile:290: build/main.o] Error 1

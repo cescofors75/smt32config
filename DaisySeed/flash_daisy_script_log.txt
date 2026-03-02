@@ -1,0 +1,4 @@
+DFU detectado en t=0s
+DFU bootloader detectado en t=1.5s
+RESULT=SAMPLES_FLASH_OK (1158.7 KB)
+RESULT=FLASH_OK
