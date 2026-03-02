@@ -1,8 +1,8 @@
 /* ═══════════════════════════════════════════════════════════════════
  *  RED808 DRUM MACHINE — Daisy Seed Slave
  * ─────────────────────────────────────────────────────────────────
- *  STM32H750 + 64 MB SDRAM | UART1 slave | Protocolo RED808
- *  44100 Hz · 128 samples/block · 24 pads · 32 voces
+ *  STM32H750 + 64 MB SDRAM | SPI1 slave | Protocolo RED808
+ *  48000 Hz · 128 samples/block · 24 pads · 32 voces
  *  Master FX: Delay, Reverb, Chorus, Tremolo, Comp, Wavefolder,
  *             Limiter, Phaser, Flanger, Global Filter
  *  Per-track: Filter, Echo, Flanger, Comp, EQ 3-band, Sends,
@@ -14,8 +14,9 @@
  *  Verificado contra: DAISY_SLAVE_GUIDE.md (ESP32-S3 v1.0)
  *
  *  PINOUT REAL (verificado en daisy_seed.h):
- *  UART1 (Master comm - TEST): D29=PB14/TX  D30=PB15/RX  (230400 8N1)
- *    ESP32 TX → Daisy D30   |   ESP32 RX → Daisy D29
+ *  SPI1 (Master comm): D7=PG10/NSS D8=PG11/SCK D9=PB4/MISO D10=PB5/MOSI
+ *    ESP32 CS→D7  SCK→D8  MOSI→D10  MISO←D9   (Mode 0, 2 MHz)
+ *  UART1 (legacy):     D29=PB14/TX  D30=PB15/RX  (230400 8N1)
  *  SPI3 (SD card, MASTER):  D0=PB12/CS(GPIO)  D2=PC10/SCK
  *                            D1=PC11/MISO      D6=PC12/MOSI
  * ═══════════════════════════════════════════════════════════════════ */
@@ -45,10 +46,15 @@ using namespace daisysp;
 DaisySeed hw;
 UartHandler uart_slave;
 
+/* SPI1 Slave — register-level polling (comunicación ESP32-S3 master)
+ * Pines: D7=PG10(NSS) D8=PG11(SCK) D9=PB4(MISO) D10=PB5(MOSI)
+ * Sin DMA, sin EXTI — polling directo del FIFO y GPIO en main loop.
+ */
+
 /* ═══════════════════════════════════════════════════════════════════
  *  2. CONFIGURACIÓN
  * ═══════════════════════════════════════════════════════════════════ */
-#define SR                 48000
+#define SAMPLE_RATE                 48000
 #define AUDIO_BLOCK        128
 #define DAISY_UART_BAUD    230400
 #define MAX_PADS           24
@@ -240,13 +246,10 @@ struct __attribute__((packed)) SPIPacketHeader {
 #define RX_BUF_SIZE  536
 #define TX_BUF_SIZE  768   /* SD responses up to 676 bytes payload */
 
-/* CRÍTICO: DMA en STM32H750 no puede acceder a DTCM-SRAM (donde van las variables
- * estáticas normales). Además, la D-cache del Cortex-M7 causa lecturas stale.
- * DMA_BUFFER_MEM_SECTION coloca estos buffers en SRAM1 (dominio D2, sin caché)
- * para que DMA pueda leer/escribir y la CPU vea los datos correctos.
- * ESTO ERA EL BUG: el modo "piu piu piu" funcionaba porque nunca leía el valor
- * del byte, solo disparaba kick incondicionalmente. Al leer rxBuf[0] para comparar
- * con 0xA5, la CPU leía un valor stale de su D-cache.                           */
+/* Buffers SPI — ya no necesitan DMA_BUFFER_MEM_SECTION porque usamos
+ * polling directo (sin DMA). Pero los dejamos en SRAM1 por si acaso
+ * para evitar problemas de D-cache cuando la CPU lee datos que llegan
+ * por el periférico SPI.                                              */
 static uint8_t DMA_BUFFER_MEM_SECTION rxBuf[RX_BUF_SIZE];
 static uint8_t DMA_BUFFER_MEM_SECTION txBuf[TX_BUF_SIZE];
 static volatile bool  waitingPayload  = false;
@@ -1028,7 +1031,8 @@ static uint8_t synthActiveMask = 0x0F;  /* 808+909+505+303 activos para demo de 
 
 /* ── Demo Mode ── */
 static Demo::DemoSequencer demoSeq;
-static constexpr bool kEnableSpiSlave = true;  /* modo integrado: comunicación SPI3 con ESP32 master */
+static constexpr bool kEnableSpiSlave = true;  /* modo integrado: comunicación con ESP32 master */
+static constexpr bool kUseSpiTransport = true;  /* true = SPI1 slave, false = UART1 (legacy) */
 static constexpr bool kEnableSynth505 = true;  /* habilitado para demo completa de arranque */
 static constexpr bool kAudioSafeMode = false; /* callback de audio real */
 static constexpr bool kBootDiagMinimal = false; /* diagnóstico extremo: solo LED, sin audio ni FX */
@@ -1098,7 +1102,7 @@ static void QueueStartupSectionTag(StartupSectionTag sec)
     startupAnnounceOsc.SetFormantFreq(kFormant[idx]);
     startupAnnounceOsc.SetPhaseShift(kPhaseShift[idx]);
     startupAnnounceEnv    = 1.0f;
-    startupAnnounceRemain = (uint32_t)(SR * 0.22f);
+    startupAnnounceRemain = (uint32_t)(SAMPLE_RATE * 0.22f);
     startupAnnounceActive = true;
 
     /* Etiqueta textual de sección (si el log USB está activo) */
@@ -1155,7 +1159,7 @@ static inline float TriFromPhase(float ph)
 
 static inline float AdDecayCoefFromMs(float decayMs)
 {
-    float samples = clampF(decayMs, 1.0f, 8000.0f) * (float)SR * 0.001f;
+    float samples = clampF(decayMs, 1.0f, 8000.0f) * (float)SAMPLE_RATE * 0.001f;
     return expf(-1.0f / samples);
 }
 
@@ -1441,7 +1445,7 @@ static void RunStartup808SelfTest(uint32_t nowMs)
         delayFeedback = 0.34f;
         reverbMix = 0.24f;
         chorusMix = 0.16f;
-        masterDelay.SetDelay(0.18f * (float)SR);
+        masterDelay.SetDelay(0.18f * (float)SAMPLE_RATE);
         masterReverb.SetFeedback(0.83f);
         masterReverb.SetLpFreq(7600.0f);
         masterChorus.SetLfoFreq(0.35f);
@@ -1476,7 +1480,7 @@ static void RunStartup808SelfTest(uint32_t nowMs)
         trkFilterType[p] = ((samplerFxStep & 3u) == 2u) ? FTYPE_BANDPASS : FTYPE_LOWPASS;
         trkFilterCut[p]  = clampF(260.0f + 11200.0f * sweep, 20.0f, 18000.0f);
         trkFilterQ[p]    = 0.75f + 2.1f * (1.0f - sweep);
-        trkFilter[p].SetType(trkFilterType[p], trkFilterCut[p], trkFilterQ[p], (float)SR);
+        trkFilter[p].SetType(trkFilterType[p], trkFilterCut[p], trkFilterQ[p], (float)SAMPLE_RATE);
 
         trkDistMode[p]   = (samplerFxStep & 1u) ? DMODE_TUBE : DMODE_SOFT;
         trkDistDrive[p]  = clampF(0.10f + 0.60f * t, 0.0f, 1.0f);
@@ -1735,7 +1739,7 @@ static void TriggerPad(uint8_t pad, uint8_t velocity,
         voices[slot].env = (atkMs <= 0.01f) ? 1.0f : 0.0f;
         voices[slot].envAttackInc = (atkMs <= 0.01f)
             ? 1.0f
-            : (1.0f / (atkMs * (float)SR * 0.001f));
+            : (1.0f / (atkMs * (float)SAMPLE_RATE * 0.001f));
         voices[slot].envDecayCoef = AdDecayCoefFromMs(trkEnvDecayMs[pad]);
         voices[slot].envStage = (atkMs <= 0.01f) ? 1 : 0;
     } else {
@@ -1764,13 +1768,13 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
     if(kStartupToneTest){
         static uint32_t toneSamples = 0;
         static float    tonePhase   = 0.0f;
-        const  uint32_t toneDurSamp = (uint32_t)SR * 3;  /* 3 segundos */
+        const  uint32_t toneDurSamp = (uint32_t)SAMPLE_RATE * 3;  /* 3 segundos */
         if(toneSamples < toneDurSamp){
             for(size_t i = 0; i < size; i++){
                 float s = 0.7f * sinf(tonePhase);
                 out[0][i] = s;
                 out[1][i] = s;
-                tonePhase += 2.0f * 3.14159265f * 1000.0f / (float)SR;
+                tonePhase += 2.0f * 3.14159265f * 1000.0f / (float)SAMPLE_RATE;
                 if(tonePhase > 2.0f * 3.14159265f) tonePhase -= 2.0f * 3.14159265f;
                 toneSamples++;
             }
@@ -1797,7 +1801,7 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
             trkFilterLfoSet[t] = 0;
             if(!trkLfoActive[t] || trkLfoDepth[t] <= 0.0001f) continue;
 
-            trkLfoPhase[t] += trkLfoRate[t] / (float)SR;
+            trkLfoPhase[t] += trkLfoRate[t] / (float)SAMPLE_RATE;
             if(trkLfoPhase[t] >= 1.0f){
                 trkLfoPhase[t] -= 1.0f;
                 if(trkLfoWave[t] == LFO_WAVE_SH)
@@ -1876,24 +1880,24 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
                     ? padScratchPhase[p]*2.f : 2.f - padScratchPhase[p]*2.f;
                 adv *= 1.f + (tri - 0.5f) * padScratchDepth[p];
                 if(adv < 0.25f) adv = 0.25f;
-                padScratchPhase[p] += padScratchRate[p] / (float)SR;
+                padScratchPhase[p] += padScratchRate[p] / (float)SAMPLE_RATE;
                 if(padScratchPhase[p] >= 1.f) padScratchPhase[p] -= 1.f;
             }
             if(padTurnOn[p]){
                 int8_t mode = padTurnMode[p];
                 if(padTurnAuto[p]){
                     mode = (padTurnPhase[p] < 0.5f) ? 0 : 1;
-                    padTurnPhase[p] += padTurnRate[p] / (float)SR;
+                    padTurnPhase[p] += padTurnRate[p] / (float)SAMPLE_RATE;
                     if(padTurnPhase[p] >= 1.f) padTurnPhase[p] -= 1.f;
                 }
                 if(mode == 1){
-                    float bsmp = padTurnBrakeMs[p] * (float)SR / 1000.f;
+                    float bsmp = padTurnBrakeMs[p] * (float)SAMPLE_RATE / 1000.f;
                     float envF = 1.f - clampF((float)padTurnCounter[p]/bsmp, 0.f, 1.f);
                     adv *= envF;
                     if(adv < 0.01f) adv = 0.01f;
                     padTurnCounter[p]++;
                 } else if(mode == 2){
-                    float bsmp = padTurnBackMs[p] * (float)SR / 1000.f;
+                    float bsmp = padTurnBackMs[p] * (float)SAMPLE_RATE / 1000.f;
                     if((padTurnCounter[p] % 3) == 0 && vx.pos > 0.f) vx.pos -= 1.f;
                     adv *= 0.7f;
                     padTurnCounter[p]++;
@@ -1915,7 +1919,7 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
 
             /* ── Scratch FX ── */
             if(padScratchOn[p]){
-                padScratchFilter[p].SetType(FTYPE_LOWPASS, padScratchCut[p], 0.707f, (float)SR);
+                padScratchFilter[p].SetType(FTYPE_LOWPASS, padScratchCut[p], 0.707f, (float)SAMPLE_RATE);
                 s = padScratchFilter[p].Process(s);
                 if(padScratchCrackle[p] > 0.01f && (FastRand() & 0xFF) < (uint32_t)(padScratchCrackle[p]*64.f))
                     s += RandFloat() * 0.05f;
@@ -1928,7 +1932,7 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
                 if(trkLfoActive[p] && trkLfoTarget[p] == LFO_TGT_FILTER && !trkFilterLfoSet[p]){
                     float modCut = trkFilterCut[p] * (1.0f + 0.9f * lfoVal[p]);
                     modCut = clampF(modCut, 20.f, 20000.f);
-                    trkFilter[p].SetType(trkFilterType[p], modCut, trkFilterQ[p], (float)SR);
+                    trkFilter[p].SetType(trkFilterType[p], modCut, trkFilterQ[p], (float)SAMPLE_RATE);
                     trkFilterLfoSet[p] = 1;
                 }
                 s = trkFilter[p].Process(s);
@@ -1965,7 +1969,7 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
                 trkFlgBuf[p][trkFlgWp[p]] = clampF(s + del*trkFlgFb[p], -1.f, 1.f);
                 s = s*(1.f - trkFlgMix[p]) + del*trkFlgMix[p];
                 trkFlgWp[p] = (trkFlgWp[p] + 1) % TRACK_FLANGER_SIZE;
-                trkFlgPhase[p] += trkFlgRate[p] / (float)SR;
+                trkFlgPhase[p] += trkFlgRate[p] / (float)SAMPLE_RATE;
                 if(trkFlgPhase[p] >= 1.f) trkFlgPhase[p] -= 1.f;
             }
 
@@ -2083,9 +2087,9 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
         L = ApplyDist(L, gFilterDist, gFilterDistMode);
         R = ApplyDist(R, gFilterDist, gFilterDistMode);
 
-        /* ── Global SR reduce ── */
-        if(gFilterSrReduce > 0 && gFilterSrReduce < (uint32_t)SR){
-            uint32_t step = (uint32_t)SR / gFilterSrReduce;
+        /* ── Global SAMPLE_RATE reduce ── */
+        if(gFilterSrReduce > 0 && gFilterSrReduce < (uint32_t)SAMPLE_RATE){
+            uint32_t step = (uint32_t)SAMPLE_RATE / gFilterSrReduce;
             if(step < 1) step = 1;
             gSrCounter++;
             if(gSrCounter >= step){
@@ -2136,7 +2140,7 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
             L = L*(1.f - flangerMix) + del*flangerMix;
             R = R*(1.f - flangerMix) + del*flangerMix;
             flangerWp = (flangerWp + 1) % 4096;
-            flangerPhase += flangerRate / (float)SR;
+            flangerPhase += flangerRate / (float)SAMPLE_RATE;
             if(flangerPhase >= 1.f) flangerPhase -= 1.f;
         }
 
@@ -2320,8 +2324,8 @@ static void ProcessCommand()
             memcpy(&gFilterSrReduce,p + 16, 4);
             gFilterCutoff = clampF(gFilterCutoff, 20.f, 20000.f);
             gFilterQ      = clampF(gFilterQ, 0.3f, 10.f);
-            gFilterL.SetType(gFilterType, gFilterCutoff, gFilterQ, (float)SR);
-            gFilterR.SetType(gFilterType, gFilterCutoff, gFilterQ, (float)SR);
+            gFilterL.SetType(gFilterType, gFilterCutoff, gFilterQ, (float)SAMPLE_RATE);
+            gFilterR.SetType(gFilterType, gFilterCutoff, gFilterQ, (float)SAMPLE_RATE);
         }
         break;
     case CMD_FILTER_CUTOFF:
@@ -2329,8 +2333,8 @@ static void ProcessCommand()
             memcpy(&gFilterCutoff, p, 4);
             gFilterCutoff = clampF(gFilterCutoff, 20.f, 20000.f);
             if(gFilterType) {
-                gFilterL.SetType(gFilterType, gFilterCutoff, gFilterQ, (float)SR);
-                gFilterR.SetType(gFilterType, gFilterCutoff, gFilterQ, (float)SR);
+                gFilterL.SetType(gFilterType, gFilterCutoff, gFilterQ, (float)SAMPLE_RATE);
+                gFilterR.SetType(gFilterType, gFilterCutoff, gFilterQ, (float)SAMPLE_RATE);
             }
         }
         break;
@@ -2339,8 +2343,8 @@ static void ProcessCommand()
             memcpy(&gFilterQ, p, 4);
             gFilterQ = clampF(gFilterQ, 0.3f, 10.f);
             if(gFilterType) {
-                gFilterL.SetType(gFilterType, gFilterCutoff, gFilterQ, (float)SR);
-                gFilterR.SetType(gFilterType, gFilterCutoff, gFilterQ, (float)SR);
+                gFilterL.SetType(gFilterType, gFilterCutoff, gFilterQ, (float)SAMPLE_RATE);
+                gFilterR.SetType(gFilterType, gFilterCutoff, gFilterQ, (float)SAMPLE_RATE);
             }
         }
         break;
@@ -2367,11 +2371,11 @@ static void ProcessCommand()
         if(len >= 4){
             float ms; memcpy(&ms, p, 4);
             delayTime = clampF(ms, 10.f, 2000.f);
-            masterDelay.SetDelay(delayTime / 1000.0f * (float)SR);
+            masterDelay.SetDelay(delayTime / 1000.0f * (float)SAMPLE_RATE);
         } else if(len >= 2){
             uint16_t ms16 = 0; memcpy(&ms16, p, 2);
             delayTime = (float)ms16;
-            masterDelay.SetDelay(delayTime / 1000.0f * (float)SR);
+            masterDelay.SetDelay(delayTime / 1000.0f * (float)SAMPLE_RATE);
         }
         break;
     case CMD_DELAY_FEEDBACK:
@@ -2542,7 +2546,7 @@ static void ProcessCommand()
             if(len >= 16) memcpy(&gain, p + 12, 4);
             trkFilterCut[t] = clampF(cut, 20.f, 20000.f);
             trkFilterQ[t]   = clampF(res, 0.3f, 10.f);
-            trkFilter[t].SetType(p[1], trkFilterCut[t], trkFilterQ[t], (float)SR, gain);
+            trkFilter[t].SetType(p[1], trkFilterCut[t], trkFilterQ[t], (float)SAMPLE_RATE, gain);
         }
         break;
     case CMD_TRACK_CLEAR_FILTER:
@@ -2574,7 +2578,7 @@ static void ProcessCommand()
             /* ESP32 sends fb & mix as 0-100 percentage; normalise to 0.0-1.0 */
             if(fb   > 1.0f) fb  /= 100.0f;
             if(mix  > 1.0f) mix /= 100.0f;
-            trkEchoDelay[t] = clampF(timeMs * (float)SR / 1000.f, 1.f, (float)(TRACK_ECHO_SIZE-1));
+            trkEchoDelay[t] = clampF(timeMs * (float)SAMPLE_RATE / 1000.f, 1.f, (float)(TRACK_ECHO_SIZE-1));
             trkEchoFb[t]    = clampF(fb, 0.f, 0.95f);
             trkEchoMix[t]   = clampF(mix, 0.f, 1.f);
         }
@@ -2682,21 +2686,21 @@ static void ProcessCommand()
     case CMD_TRACK_EQ_LOW:
         if(len >= 2 && p[0] < MAX_PADS){
             trkEqLowDb[p[0]] = (int8_t)p[1];
-            trkEqLow[p[0]].SetType(FTYPE_LOWSHELF, 200.f, 0.707f, (float)SR,
+            trkEqLow[p[0]].SetType(FTYPE_LOWSHELF, 200.f, 0.707f, (float)SAMPLE_RATE,
                                     (float)(int8_t)p[1]);
         }
         break;
     case CMD_TRACK_EQ_MID:
         if(len >= 2 && p[0] < MAX_PADS){
             trkEqMidDb[p[0]] = (int8_t)p[1];
-            trkEqMid[p[0]].SetType(FTYPE_PEAKING, 1000.f, 1.0f, (float)SR,
+            trkEqMid[p[0]].SetType(FTYPE_PEAKING, 1000.f, 1.0f, (float)SAMPLE_RATE,
                                    (float)(int8_t)p[1]);
         }
         break;
     case CMD_TRACK_EQ_HIGH:
         if(len >= 2 && p[0] < MAX_PADS){
             trkEqHighDb[p[0]] = (int8_t)p[1];
-            trkEqHigh[p[0]].SetType(FTYPE_HIGHSHELF, 4000.f, 0.707f, (float)SR,
+            trkEqHigh[p[0]].SetType(FTYPE_HIGHSHELF, 4000.f, 0.707f, (float)SAMPLE_RATE,
                                     (float)(int8_t)p[1]);
         }
         break;
@@ -2770,7 +2774,7 @@ static void ProcessCommand()
             if(len >= 16) memcpy(&gain, p + 12, 4);
             padFilterCut[pad] = clampF(cut, 20.f, 20000.f);
             padFilterQ[pad]   = clampF(res, 0.3f, 10.f);
-            padFilter[pad].SetType(p[1], padFilterCut[pad], padFilterQ[pad], (float)SR, gain);
+            padFilter[pad].SetType(p[1], padFilterCut[pad], padFilterQ[pad], (float)SAMPLE_RATE, gain);
         }
         break;
     case CMD_PAD_CLEAR_FILTER:
@@ -3277,10 +3281,10 @@ static void ProcessCommand()
         masterPeak = 0;
         spiPktCnt = 0; spiErrCnt = 0;
         /* Reset synth engines */
-        synth808.Init((float)SR);
-        synth909.Init((float)SR);
-        synth505.Init((float)SR);
-        acid303.Init((float)SR);
+        synth808.Init((float)SAMPLE_RATE);
+        synth909.Init((float)SAMPLE_RATE);
+        synth505.Init((float)SAMPLE_RATE);
+        acid303.Init((float)SAMPLE_RATE);
         synthActiveMask = 0x0B;
         break;
 
@@ -3480,7 +3484,206 @@ static void ProcessCommand()
 }
 
 /* ═══════════════════════════════════════════════════════════════════
- *  24. UART RX — 100% byte-a-byte, DMA target SIEMPRE en rxBuf
+ *  24-A. SPI1 SLAVE — Transporte SPI con ESP32-S3 master
+ *
+ *  Estrategia: Register-level polling (sin DMA, sin EXTI)
+ *  - Main loop lee NSS (CS) pin directamente via GPIOG IDR
+ *  - Cuando CS baja, lee bytes del FIFO SPI hasta que CS sube
+ *  - Procesa comando inmediatamente, arma respuesta
+ *  - Cuando CS baja de nuevo (segunda transacción), envía respuesta
+ *
+ *  Ventajas sobre DMA+EXTI:
+ *  - Sin problemas de HAL state machine lockup
+ *  - Sin conflictos EXTI/AF en STM32H7
+ *  - Sin timing issues con DMA TSIZE vs bytes reales
+ *  - Latencia predecible: <5µs desde primer byte
+ *
+ *  Performance: @2MHz SPI clock, 1 byte = 4µs. Main loop @480MHz
+ *  puede polling sin perder bytes. Audio callback cada 2.67ms
+ *  (128 samples @ 48kHz) tiene mayor prioridad.
+ * ═══════════════════════════════════════════════════════════════════ */
+
+/* Inline helpers para leer NSS (CS) pin — PG10 */
+static inline bool SPI_CS_IS_LOW()  { return !(GPIOG->IDR & GPIO_PIN_10); }
+static inline bool SPI_CS_IS_HIGH() { return  (GPIOG->IDR & GPIO_PIN_10); }
+
+static volatile uint32_t spiSlvIsrCnt = 0;  /* debug: transacciones completadas */
+
+/* ── SPI1 slave init — registros directos ────────────────────── */
+static void InitSpi1Slave()
+{
+    /* 1. Clocks */
+    __HAL_RCC_SPI1_CLK_ENABLE();
+    __HAL_RCC_GPIOG_CLK_ENABLE();
+    __HAL_RCC_GPIOB_CLK_ENABLE();
+
+    /* 2. GPIO — AF5 para SCK, MISO, MOSI. NSS como AF5 también
+     *    (SPI NSS hard input) pero leemos IDR para polling CS    */
+    GPIO_InitTypeDef gpio = {};
+    gpio.Mode      = GPIO_MODE_AF_PP;
+    gpio.Speed     = GPIO_SPEED_FREQ_VERY_HIGH;
+    gpio.Alternate = GPIO_AF5_SPI1;
+
+    /* PG10 = NSS — AF5 + pull-up (idle HIGH) */
+    gpio.Pin  = GPIO_PIN_10;
+    gpio.Pull = GPIO_PULLUP;
+    HAL_GPIO_Init(GPIOG, &gpio);
+
+    /* PG11 = SCK */
+    gpio.Pin  = GPIO_PIN_11;
+    gpio.Pull = GPIO_NOPULL;
+    HAL_GPIO_Init(GPIOG, &gpio);
+
+    /* PB4 = MISO (slave output) */
+    gpio.Pin  = GPIO_PIN_4;
+    gpio.Pull = GPIO_NOPULL;
+    HAL_GPIO_Init(GPIOB, &gpio);
+
+    /* PB5 = MOSI (slave input) */
+    gpio.Pin  = GPIO_PIN_5;
+    gpio.Pull = GPIO_NOPULL;
+    HAL_GPIO_Init(GPIOB, &gpio);
+
+    /* 3. SPI1 — registros directos (NO HAL_SPI_Init, evita conflicto
+     *    con libdaisy SPI handles)                                    */
+    SPI_TypeDef* spi = SPI1;
+
+    /* Disable SPI para configurar */
+    spi->CR1 &= ~SPI_CR1_SPE;
+
+    /* CFG1: 8-bit data, FIFO threshold = 1 byte
+     * DSIZE[4:0] = 7 → 8-bit frames
+     * FTHLV[1:0] = 0 → threshold de 1 data (RXP activo con 1 byte) */
+    spi->CFG1 = (7U << SPI_CFG1_DSIZE_Pos)
+              | (0U << SPI_CFG1_FTHLV_Pos);
+
+    /* CFG2: TODO en 0 → configuración por defecto ideal para slave:
+     *   MASTER=0 (slave), CPOL=0, CPHA=0, LSBFRST=0 (MSB first),
+     *   SSM=0 (hardware NSS), SSOE=0 (NSS input en slave),
+     *   SSOM=0, SSIOP=0 (NSS active low), SP=0 (Motorola/SPI),
+     *   COMM=00 (full duplex), MIDI=0, MSSI=0                      */
+    spi->CFG2 = 0;
+
+    /* Limpiar todos los flags */
+    spi->IFCR = 0xFFFFFFFF;
+
+    /* TSIZE = 0 → modo continuo (no EOT automático) */
+    spi->CR2 = 0;
+
+    /* Enable SPI */
+    spi->CR1 |= SPI_CR1_SPE;
+}
+
+/* ── Recibir una transacción completa (CS LOW → bytes → CS HIGH) ─ */
+static uint16_t SpiSlaveReceive(uint8_t* buf, uint16_t maxLen)
+{
+    SPI_TypeDef* spi = SPI1;
+    uint16_t idx = 0;
+
+    /* Esperar hasta que CS baje (con timeout) */
+    uint32_t t0 = hw.system.GetNow();
+    while(SPI_CS_IS_HIGH()){
+        if((hw.system.GetNow() - t0) > 100) return 0;  /* 100ms timeout */
+    }
+
+    /* CS está LOW — leer bytes mientras CS sigue LOW */
+    while(SPI_CS_IS_LOW())
+    {
+        /* ¿Hay datos en el FIFO RX? (RXPLVL o RXP flag) */
+        if(spi->SR & SPI_SR_RXP)
+        {
+            if(idx < maxLen)
+                buf[idx++] = *(volatile uint8_t*)&spi->RXDR;
+            else
+                (void)*(volatile uint8_t*)&spi->RXDR;  /* discard overflow */
+        }
+    }
+
+    /* CS subió — vaciar FIFO residual (bytes que llegaron justo al final) */
+    for(int drain = 0; drain < 16 && (spi->SR & SPI_SR_RXP); drain++)
+    {
+        if(idx < maxLen)
+            buf[idx++] = *(volatile uint8_t*)&spi->RXDR;
+        else
+            (void)*(volatile uint8_t*)&spi->RXDR;
+    }
+
+    /* Limpiar flags para la próxima transacción */
+    spi->IFCR = SPI_IFCR_OVRC | SPI_IFCR_UDRC | SPI_IFCR_TXTFC
+              | SPI_IFCR_EOTC | SPI_IFCR_SUSPC;
+
+    return idx;
+}
+
+/* ── Enviar respuesta completa (esperar 2da transacción CS + TX) ── */
+static bool SpiSlaveSendResponse(uint16_t len, uint16_t timeoutMs)
+{
+    SPI_TypeDef* spi = SPI1;
+
+    /* 1. Reset SPI para limpiar estado de RX anterior */
+    spi->CR1 &= ~SPI_CR1_SPE;
+    spi->IFCR = 0xFFFFFFFF;
+    spi->CR2  = 0;  /* TSIZE=0 → continuo */
+
+    /* 2. Pre-cargar TX FIFO (hasta 16 bytes) antes de habilitar SPI.
+     *    Así cuando el master baje CS y clockee, los primeros bytes
+     *    ya están listos en MISO sin latencia.                       */
+    uint16_t txIdx = 0;
+    spi->CR1 |= SPI_CR1_SPE;
+
+    uint16_t preload = (len < 16) ? len : 16;
+    for(uint16_t i = 0; i < preload; i++)
+    {
+        uint32_t guard = 0;
+        while(!(spi->SR & SPI_SR_TXP) && ++guard < 100000) {}
+        *(volatile uint8_t*)&spi->TXDR = txBuf[txIdx++];
+    }
+
+    /* 3. Esperar CS LOW (master inicia segunda transacción) */
+    uint32_t t0 = hw.system.GetNow();
+    while(SPI_CS_IS_HIGH()){
+        if((hw.system.GetNow() - t0) > timeoutMs) return false;
+    }
+
+    /* 4. CS está LOW — el master clockea. Alimentar TX FIFO con
+     *    bytes restantes y drenar RX FIFO simultáneamente.          */
+    while(SPI_CS_IS_LOW())
+    {
+        /* Alimentar TX si hay más bytes por enviar */
+        if(txIdx < len && (spi->SR & SPI_SR_TXP))
+        {
+            *(volatile uint8_t*)&spi->TXDR = txBuf[txIdx++];
+        }
+        /* Drenar RX (master envía 0xFF dummies) */
+        if(spi->SR & SPI_SR_RXP)
+        {
+            (void)*(volatile uint8_t*)&spi->RXDR;
+        }
+    }
+
+    /* 5. CS HIGH — drenar residual */
+    for(int d = 0; d < 16; d++)
+    {
+        if(spi->SR & SPI_SR_RXP)
+            (void)*(volatile uint8_t*)&spi->RXDR;
+    }
+
+    spi->IFCR = 0xFFFFFFFF;
+    return true;
+}
+
+/* ── Reset SPI para próxima recepción ─────────────────────────── */
+static void SpiSlaveResetForRx()
+{
+    SPI_TypeDef* spi = SPI1;
+    spi->CR1 &= ~SPI_CR1_SPE;
+    spi->IFCR = 0xFFFFFFFF;
+    spi->CR2 = 0;
+    spi->CR1 |= SPI_CR1_SPE;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+ *  24-B. UART RX — 100% byte-a-byte, DMA target SIEMPRE en rxBuf
  *      IMPORTANTE: En STM32H750 el DMA NO puede acceder a DTCM SRAM.
  *      Variables static pueden caer en DTCM. rxBuf está en D2-SRAM
  *      (accesible por DMA). Por eso recibimos SIEMPRE dentro de rxBuf.
@@ -4020,7 +4223,7 @@ static void InitArrays()
 
 static void InitFX()
 {
-    float sr = (float)SR;
+    float sr = (float)SAMPLE_RATE;
 
     masterDelay.Init();
     masterDelay.SetDelay(sr * 0.25f);
@@ -4110,7 +4313,7 @@ int main()
     Log("══════════════════════════════════════════");
     Log("  RED808 DrumMachine — Daisy Seed Slave");
     Log("  %d pads · %d voices · %d Hz · %d block",
-        MAX_PADS, MAX_VOICES, SR, AUDIO_BLOCK);
+        MAX_PADS, MAX_VOICES, SAMPLE_RATE, AUDIO_BLOCK);
     Log("  Synth: TR808 · TR909 · TR505 · TB303");
     Log("  DEMO MODE: auto-play 3 min");
     Log("══════════════════════════════════════════");
@@ -4222,20 +4425,33 @@ int main()
 
     if(kEnableSpiSlave)
     {
-        /* ── UART1 (comunicación con ESP32-S3, TEST) — D29=TX(PB14) D30=RX(PB15) 230400 8N1 ── */
-        Log("Iniciando UART1 (%d 8N1)...", DAISY_UART_BAUD);
-        UartHandler::Config uart_config;
-        uart_config.periph        = UartHandler::Config::Peripheral::USART_1;
-        uart_config.mode          = UartHandler::Config::Mode::TX_RX;
-        uart_config.baudrate      = DAISY_UART_BAUD;
-        uart_config.stopbits      = UartHandler::Config::StopBits::BITS_1;
-        uart_config.parity        = UartHandler::Config::Parity::NONE;
-        uart_config.wordlength    = UartHandler::Config::WordLength::BITS_8;
-        uart_config.pin_config.tx = hw.GetPin(29);  /* D29 = PB14 (USART1_TX) */
-        uart_config.pin_config.rx = hw.GetPin(30);  /* D30 = PB15 (USART1_RX) */
-        uart_slave.Init(uart_config);
-        UartStartScan();   /* Inicia escaneo byte-a-byte buscando magic 0xA5 */
-        Log("UART1 listo TEST (D29=TX D30=RX, ESP32: TX->D30 RX->D29)");
+        if(kUseSpiTransport)
+        {
+            /* ── SPI1 SLAVE (comunicación con ESP32-S3) ──
+             * D7=PG10(NSS) D8=PG11(SCK) D9=PB4(MISO) D10=PB5(MOSI)
+             * Mode 0 (CPOL=0 CPHA=0), 8-bit, NSS HARD_INPUT           */
+            Log("Iniciando SPI1 slave (Mode0 NSS_HARD)...");
+            InitSpi1Slave();
+            Log("SPI1 SLAVE listo (D7=CS D8=SCK D9=MISO D10=MOSI)");
+        }
+        else
+        {
+            /* ── UART1 legacy (comunicación con ESP32-S3) ──
+             * D29=TX(PB14) D30=RX(PB15) 230400 8N1                     */
+            Log("Iniciando UART1 (%d 8N1)...", DAISY_UART_BAUD);
+            UartHandler::Config uart_config;
+            uart_config.periph        = UartHandler::Config::Peripheral::USART_1;
+            uart_config.mode          = UartHandler::Config::Mode::TX_RX;
+            uart_config.baudrate      = DAISY_UART_BAUD;
+            uart_config.stopbits      = UartHandler::Config::StopBits::BITS_1;
+            uart_config.parity        = UartHandler::Config::Parity::NONE;
+            uart_config.wordlength    = UartHandler::Config::WordLength::BITS_8;
+            uart_config.pin_config.tx = hw.GetPin(29);  /* D29 = PB14 (USART1_TX) */
+            uart_config.pin_config.rx = hw.GetPin(30);  /* D30 = PB15 (USART1_RX) */
+            uart_slave.Init(uart_config);
+            UartStartScan();
+            Log("UART1 listo (D29=TX D30=RX, ESP32: TX->D30 RX->D29)");
+        }
     }
     else
     {
@@ -4245,7 +4461,7 @@ int main()
     /* ── Start Audio ── */
     if(kEnableAudioStart)
     {
-        Log("Iniciando audio @ %d Hz, %d samples/block", SR, AUDIO_BLOCK);
+        Log("Iniciando audio @ %d Hz, %d samples/block", SAMPLE_RATE, AUDIO_BLOCK);
         hw.StartAudio(AudioCallback);
     }
     else
@@ -4262,18 +4478,97 @@ int main()
 
     /* ── Main loop ── */
     while(1){
-        /* ── SPI response (NUNCA desde ISR) ── */
-        if(kEnableSpiSlave && pendingResponse){
+
+        /* ━━━━━ SPI1 slave transport — POLLING ━━━━━
+         * Sin DMA, sin EXTI. Leemos NSS (CS) pin directamente.
+         * TIMING CRÍTICO: El audio callback (cada 2.67ms) puede preemptar
+         * el código entre TX1 y TX2. Para garantizar que se carga el FIFO
+         * TX dentro de la ventana del master (8ms), usamos __disable_irq()
+         * durante el proceso + preload. El window es < 20µs → seguro.     */
+        if(kEnableSpiSlave && kUseSpiTransport)
+        {
+            /* Recibir primera transacción (bloquea con 100ms timeout) */
+            uint16_t rxLen = SpiSlaveReceive(rxBuf, RX_BUF_SIZE);
+            if(rxLen >= 8)
+            {
+                SPIPacketHeader* hdr = (SPIPacketHeader*)rxBuf;
+                if(hdr->magic == SPI_MAGIC_CMD &&
+                   rxLen >= (uint16_t)(8 + hdr->length))
+                {
+                    spiSlvIsrCnt++;
+                    uartLedPulseUntilMs = hw.system.GetNow() + 60;
+                    if(demoModeActive){ demoModeActive = false; }
+
+                    /* ── SECCIÓN CRÍTICA: process + preload TX FIFO ──
+                     * IRQs deshabilitadas ~10µs para garantizar que el
+                     * TX FIFO esté listo antes de que el master baje CS
+                     * (gap de 8ms entre TX1 y TX2 en ESP32).            */
+                    __disable_irq();
+                    ProcessCommand();
+                    bool doTx = pendingResponse;
+                    uint16_t txLen = pendingTxLen;
+                    if(doTx)
+                    {
+                        pendingResponse = false;
+                        /* Pre-armar TX: reset SPI + preload FIFO ahora */
+                        SPI_TypeDef* spi = SPI1;
+                        spi->CR1 &= ~SPI_CR1_SPE;
+                        spi->IFCR = 0xFFFFFFFF;
+                        spi->CR2  = 0;
+                        spi->CR1 |= SPI_CR1_SPE;
+                        uint16_t preload = (txLen < 16) ? txLen : 16;
+                        for(uint16_t i = 0; i < preload; i++)
+                        {
+                            uint32_t g = 0;
+                            while(!(spi->SR & SPI_SR_TXP) && ++g < 10000){}
+                            *(volatile uint8_t*)&spi->TXDR = txBuf[i];
+                        }
+                    }
+                    __enable_irq();
+                    /* ── FIN SECCIÓN CRÍTICA ── */
+
+                    if(doTx)
+                    {
+                        /* Esperar CS LOW (segunda transacción) + drenar TX
+                         * residual. IRQs habilitadas → audio puede correr.  */
+                        uint32_t t0 = hw.system.GetNow();
+                        while(SPI_CS_IS_HIGH()){
+                            if((hw.system.GetNow() - t0) > 10) break;
+                        }
+                        uint16_t txIdx2 = (txLen < 16) ? txLen : 16;
+                        while(SPI_CS_IS_LOW())
+                        {
+                            if(txIdx2 < txLen && (SPI1->SR & SPI_SR_TXP))
+                                *(volatile uint8_t*)&SPI1->TXDR = txBuf[txIdx2++];
+                            if(SPI1->SR & SPI_SR_RXP)
+                                (void)*(volatile uint8_t*)&SPI1->RXDR;
+                        }
+                        for(int d = 0; d < 16; d++){
+                            if(SPI1->SR & SPI_SR_RXP)
+                                (void)*(volatile uint8_t*)&SPI1->RXDR;
+                        }
+                        SPI1->IFCR = 0xFFFFFFFF;
+                    }
+                    SpiSlaveResetForRx();
+                }
+                else
+                {
+                    spiErrCnt++;
+                    SpiSlaveResetForRx();
+                }
+            }
+        }
+
+        /* ━━━━━ UART1 legacy transport ━━━━━ */
+        if(kEnableSpiSlave && !kUseSpiTransport && pendingResponse)
+        {
             pendingResponse = false;
             uart_slave.DmaTransmit(txBuf, pendingTxLen, nullptr, nullptr, nullptr);
             System::Delay(1);
-            UartStartScan();  /* Re-iniciar escaneo byte-a-byte */
+            UartStartScan();
         }
 
-        /* ── LED diagnóstico UART ──
-         * OFF por defecto
-         * Pulso: llegó header con magic válido y longitud coherente
-         */
+        /* ── LED diagnóstico ── */
         uint32_t now = hw.system.GetNow();
         RunStartup808SelfTest(now);
         hw.SetLed(now < uartLedPulseUntilMs);
