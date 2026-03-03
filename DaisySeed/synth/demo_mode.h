@@ -171,7 +171,7 @@ public:
             synth303_->SetDecay(0.2f);
             synth303_->SetAccent(0.6f);
             synth303_->SetWaveform(TB303::WAVE_SAW);
-            synth303_->volume = 0.6f;
+            synth303_->SetVolume(0.6f);
         }
 
         /* Volúmenes iniciales */

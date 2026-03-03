@@ -35,6 +35,7 @@
 #include "synth/tr909.h"
 #include "synth/tr505.h"
 #include "synth/tb303.h"
+#include "synth/wavetable_osc.h"
 #include "synth/demo_mode.h"
 
 using namespace daisy;
@@ -211,6 +212,7 @@ static DMA_HandleTypeDef  hdma_spi1_tx;
 #define SYNTH_ENGINE_909   1
 #define SYNTH_ENGINE_505   2
 #define SYNTH_ENGINE_303   3
+#define SYNTH_ENGINE_WTOSC 4
 
 /* Bulk */
 #define CMD_BULK_TRIGGERS     0xF0
@@ -1043,6 +1045,8 @@ static TR808::Kit synth808;
 static TR909::Kit synth909;
 static TR505::Kit synth505;
 static TB303::Synth acid303;
+static WavetableOsc wtOsc;
+static uint8_t trackWtNote[16];  /* nota MIDI por track WT, default C4=60 */
 
 /* ═══════════════════════════════════════════════════════════════════
  *  Tabla de remap: padIndex del ESP32 → TR808::InstrumentId
@@ -1121,8 +1125,8 @@ static inline void Synth808TriggerByPad(uint8_t padIdx, float velocity)
         synth808.Trigger(TR808::INST_KICK, velocity); /* fallback */
 }
 
-/* Bitmask: qué engines están activos (bit0=808, bit1=909, bit2=505, bit3=303) */
-static uint8_t synthActiveMask = 0x0F;  /* 808+909+505+303 activos para demo de arranque completa */
+/* Bitmask: qué engines están activos (bit0=808, bit1=909, bit2=505, bit3=303, bit4=WTOSC) */
+static uint8_t synthActiveMask = 0x1F;  /* 808+909+505+303+WTOSC activos */
 
 /* ── Demo Mode ── */
 static Demo::DemoSequencer demoSeq;
@@ -1876,7 +1880,7 @@ static void DsqFireStep() {
         if(!s.active || s.velocity == 0) continue;
 
         int8_t  eng     = dsqTrackEngine[t];
-        bool    isSynth = (eng >= 0 && eng <= 3);
+        bool    isSynth = (eng >= 0 && eng <= 4);
 
         /* Tracks de sampler: verificar que hay muestra cargada */
         if(!isSynth && !sampleLoaded[t]) continue;
@@ -1925,6 +1929,11 @@ static void DsqFireStep() {
                     bool    accent = (vel > 0.85f);
                     bool    slide  = false;
                     acid303.NoteOn(note, accent, slide);
+                    break;
+                }
+                case SYNTH_ENGINE_WTOSC: {
+                    uint8_t note = (t < 16) ? trackWtNote[t] : 60;
+                    wtOsc.NoteOn(note, vel);
                     break;
                 }
             }
@@ -2251,6 +2260,8 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
             synthMix += synth505.Process();
         if (synthActiveMask & (1 << SYNTH_ENGINE_303))
             synthMix += acid303.Process();
+        if (synthActiveMask & (1 << SYNTH_ENGINE_WTOSC))
+            synthMix += wtOsc.Process();
 
         /* Aplicar fade del demo mode */
         if (demoModeActive)
@@ -2450,10 +2461,37 @@ static void ProcessCommand()
             uint8_t pad = p[0];
             uint8_t vel = p[1];
             if(kAcceptOneBasedPadIndex && pad > 0) pad -= 1;
-            TriggerPad(pad, vel, 100, 0, 0, liveVolume);
+            int8_t livEng = (pad < DSQ_TRACKS) ? dsqTrackEngine[pad] : -1;
+            if(livEng >= 0 && livEng <= 4){
+                /* Synth engine activo: disparar synth, NO sampler */
+                float fvel = clampF(vel / 127.0f, 0.0f, 1.0f);
+                switch(livEng){
+                    case SYNTH_ENGINE_808:
+                        if(pad < 16) synth808.Trigger(padTo808[pad], fvel);
+                        break;
+                    case SYNTH_ENGINE_909:
+                        if(pad < 16) synth909.Trigger(padTo909[pad], fvel);
+                        break;
+                    case SYNTH_ENGINE_505:
+                        if(pad < 16) synth505.Trigger(padTo505[pad], fvel);
+                        break;
+                    case SYNTH_ENGINE_303: {
+                        uint8_t note = (pad < 16) ? padTo303Midi[pad] : 48;
+                        bool    acc  = (fvel > 0.85f);
+                        acid303.NoteOn(note, acc, false);
+                        break;
+                    }
+                    case SYNTH_ENGINE_WTOSC: {
+                        uint8_t note = (pad < 16) ? trackWtNote[pad] : 60;
+                        wtOsc.NoteOn(note, fvel);
+                        break;
+                    }
+                }
+            } else {
+                /* Modo sampler (por defecto) */
+                TriggerPad(pad, vel, 100, 0, 0, liveVolume);
+            }
             spiLastTriggerMs = hw.system.GetNow();
-            if(kTriggerSynthOnLiveCmd)
-                Synth808TriggerByPad(pad, clampF(vel / 127.0f, 0.0f, 1.0f));
         }
         break;
 
@@ -3545,7 +3583,9 @@ static void ProcessCommand()
         synth909.Init((float)SAMPLE_RATE);
         synth505.Init((float)SAMPLE_RATE);
         acid303.Init((float)SAMPLE_RATE);
-        synthActiveMask = 0x0B;
+        wtOsc.Init((float)SAMPLE_RATE);
+        for(int i=0;i<16;i++) trackWtNote[i] = (uint8_t)(60 + (i % 12)); /* C4..B4 cromático */
+        synthActiveMask = 0x1B;  /* 808+909+303+WTOSC (505 desactivado en reset) */
         break;
 
     /* ════════════════════════════════════════════
@@ -3595,6 +3635,11 @@ static void ProcessCommand()
                     acid303.NoteOn(note, accent, slide);
                     break;
                 }
+                case SYNTH_ENGINE_WTOSC: {
+                    uint8_t note = (instrument < 16) ? trackWtNote[instrument] : 60;
+                    wtOsc.NoteOn(note, velocity);
+                    break;
+                }
             }
         }
         break;
@@ -3612,17 +3657,22 @@ static void ProcessCommand()
                         case TR808::INST_KICK:
                             if(paramId==0) synth808.kick.SetDecay(val);
                             if(paramId==1) synth808.kick.SetPitch(val);
-                            if(paramId==2) synth808.kick.saturation = clampF(val,0.f,1.f);
+                            if(paramId==2) synth808.kick.SetDrive(val);      /* v2.0: drive (era saturation) */
                             if(paramId==3) synth808.kick.volume = clampF(val,0.f,1.f);
+                            if(paramId==4) synth808.kick.subLevel  = clampF(val,0.f,0.5f); /* v2.0: sub-osc */
+                            if(paramId==5) synth808.kick.pitchAmt  = clampF(val,1.f,20.f); /* v2.0: pitch amt */
+                            if(paramId==6) synth808.kick.SetPitchDecay(val);               /* v2.0: pitch decay */
                             break;
                         case TR808::INST_SNARE:
                             if(paramId==0) synth808.snare.SetDecay(val);
+                            if(paramId==1) synth808.snare.SetPitch(val);     /* v2.0: pitch */
                             if(paramId==2) synth808.snare.SetTone(val);
                             if(paramId==3) synth808.snare.volume = clampF(val,0.f,1.f);
                             if(paramId==4) synth808.snare.SetSnappy(val);
                             break;
                         case TR808::INST_CLAP:
                             if(paramId==0) synth808.clap.SetDecay(val);
+                            if(paramId==2) synth808.clap.SetSnap(val);       /* v2.0: snap (burst sharpness) */
                             if(paramId==3) synth808.clap.volume = clampF(val,0.f,1.f);
                             break;
                         case TR808::INST_HIHAT_C:
@@ -3635,14 +3685,33 @@ static void ProcessCommand()
                             break;
                         case TR808::INST_COWBELL:
                             if(paramId==0) synth808.cowbell.SetDecay(val);
+                            if(paramId==1) synth808.cowbell.SetTune(val);    /* v2.0: tune 0.7-1.5 */
                             if(paramId==3) synth808.cowbell.volume = clampF(val,0.f,1.f);
                             break;
                         case TR808::INST_CYMBAL:
                             if(paramId==0) synth808.cymbal.SetDecay(val);
                             if(paramId==3) synth808.cymbal.volume = clampF(val,0.f,1.f);
                             break;
+                        case TR808::INST_LOW_TOM:
+                            if(paramId==0) synth808.lowTom.SetDecay(val);
+                            if(paramId==1) synth808.lowTom.SetPitch(val);
+                            if(paramId==3) synth808.lowTom.volume = clampF(val,0.f,1.f);
+                            if(paramId==5) synth808.lowTom.smack = clampF(val,0.f,1.f);  /* v2.0: smack */
+                            break;
+                        case TR808::INST_MID_TOM:
+                            if(paramId==0) synth808.midTom.SetDecay(val);
+                            if(paramId==1) synth808.midTom.SetPitch(val);
+                            if(paramId==3) synth808.midTom.volume = clampF(val,0.f,1.f);
+                            if(paramId==5) synth808.midTom.smack = clampF(val,0.f,1.f);
+                            break;
+                        case TR808::INST_HI_TOM:
+                            if(paramId==0) synth808.hiTom.SetDecay(val);
+                            if(paramId==1) synth808.hiTom.SetPitch(val);
+                            if(paramId==3) synth808.hiTom.volume = clampF(val,0.f,1.f);
+                            if(paramId==5) synth808.hiTom.smack = clampF(val,0.f,1.f);
+                            break;
                         default:
-                            /* Toms, congas: paramId 0=decay, 3=volume */
+                            /* Congas, claves, maracas, rimshot: paramId 3=volume */
                             break;
                     }
                     break;
@@ -3664,6 +3733,40 @@ static void ProcessCommand()
                     break;
                 case SYNTH_ENGINE_505:
                     /* 505 param handling similar */
+                    break;
+                case SYNTH_ENGINE_WTOSC:
+                    switch(paramId){
+                        case 0: wtOsc.SetWavePos(val);                           break; /* wave_pos 0-7      */
+                        case 1: wtOsc.SetAttack(val);                            break; /* attack ms         */
+                        case 2: wtOsc.SetDecay(val);                             break; /* decay ms          */
+                        case 3: wtOsc.volume = clampF(val, 0.f, 1.f);           break; /* volume            */
+                        case 4: { /* filter cutoff Hz (instrument byte = Q×10 si >=1) */
+                            static float wtQ = 0.707f;
+                            if(instrument >= 1) wtQ = clampF((float)instrument * 0.1f, 0.1f, 20.f);
+                            wtOsc.SetFilter(val, wtQ);
+                            break; }
+                        case 5: { /* lfo rate Hz */
+                            static float wtLfoR=2.f, wtLfoD=0.f;
+                            static WtLfoTarget wtLfoT=WT_LFO_WAVE;
+                            wtLfoR = val;
+                            wtOsc.SetLfo(wtLfoR, wtLfoD, wtLfoT);
+                            break; }
+                        case 6: { /* lfo depth 0-1 */
+                            static float wtLfoR=2.f, wtLfoD=0.f;
+                            static WtLfoTarget wtLfoT=WT_LFO_WAVE;
+                            wtLfoD = val;
+                            wtOsc.SetLfo(wtLfoR, wtLfoD, wtLfoT);
+                            break; }
+                        case 7: { /* lfo target: 0=wave 1=pitch 2=vol */
+                            static float wtLfoR=2.f, wtLfoD=0.f;
+                            WtLfoTarget wtLfoT = (WtLfoTarget)clampF(val, 0.f, 2.f);
+                            wtOsc.SetLfo(wtLfoR, wtLfoD, wtLfoT);
+                            break; }
+                        case 8: /* nota MIDI del track (instrument=track index) */
+                            if(instrument < 16)
+                                trackWtNote[instrument] = (uint8_t)clampF(val, 0.f, 127.f);
+                            break;
+                    }
                     break;
             }
         }
@@ -3694,7 +3797,15 @@ static void ProcessCommand()
                 case 4: acid303.SetAccent(val);     break;
                 case 5: acid303.SetSlide(val);      break;
                 case 6: acid303.SetWaveform(val < 0.5f ? TB303::WAVE_SAW : TB303::WAVE_SQUARE); break;
-                case 7: acid303.volume = clampF(val, 0.f, 1.f); break;
+                case 7: acid303.SetVolume(val);     break;
+                /* v2.0 new params */
+                case 8:  acid303.SetAttack(val);    break; /* attack s   */
+                case 9:  acid303.SetSustain(val);   break; /* sustain 0-1*/
+                case 10: acid303.SetRelease(val);   break; /* release s  */
+                case 11: acid303.SetOverdrive(val); break; /* overdrive  */
+                case 12: acid303.SetSubLevel(val);  break; /* sub osc    */
+                case 13: acid303.SetDrift(val);     break; /* analog drift*/
+                case 14: acid303.SetPitchBend(val); break; /* semitones  */
             }
         }
         break;
@@ -4566,6 +4677,8 @@ static void InitFX()
     synth909.Init(sr);
     synth505.Init(sr);
     acid303.Init(sr);
+    wtOsc.Init(sr);
+    for(int i=0; i<16; i++) trackWtNote[i] = (uint8_t)(60 + (i % 12)); /* C4..B4 */
     startupAnnounceOsc.Init(sr);
     startupAnnounceOsc.SetCarrierFreq(100.0f);
     startupAnnounceOsc.SetFormantFreq(900.0f);
