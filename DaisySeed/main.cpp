@@ -216,6 +216,18 @@ static DMA_HandleTypeDef  hdma_spi1_tx;
 #define CMD_BULK_TRIGGERS     0xF0
 #define CMD_BULK_FX           0xF1
 
+/* Daisy Sequencer (0xD0-0xDF) */
+#define CMD_DSQ_UPLOAD_TRACK    0xD0  /* [pat,trk,stepCount,rsvd + N×{act,vel,div,prob}] */
+#define CMD_DSQ_SET_STEP        0xD1  /* [pat,trk,step,active,vel,div,prob,rsvd]          */
+#define CMD_DSQ_CONTROL         0xD2  /* [0=stop, 1=play, 2=reset]                       */
+#define CMD_DSQ_SELECT_PATTERN  0xD3  /* [pat 0-7]                                        */
+#define CMD_DSQ_SET_LENGTH      0xD4  /* [16/32/64]                                       */
+#define CMD_DSQ_SET_MUTE        0xD5  /* [track, muted 0/1]                               */
+#define CMD_DSQ_GET_POS         0xD6  /* no payload → [step,pat,playing,rsvd]             */
+#define CMD_DSQ_SET_SWING       0xD7  /* [swing 0-100]                                    */
+#define CMD_DSQ_SET_PARAM_LOCK  0xD8  /* [pat,trk,step,cutoffEn,cutHi,cutLo,revEn,rev,volEn,vol,rsvd,rsvd] */
+#define CMD_DSQ_SET_TRACK_ENGINE 0xD9 /* [track(1), engine(1)]  0xFF/-1=sampler 0=808 1=909 2=505 3=303     */
+
 /* Filter types */
 #define FTYPE_NONE       0
 #define FTYPE_LOWPASS    1
@@ -377,6 +389,82 @@ static float liveVolume  = 1.0f;
 static float transportBpm = 120.0f;
 static float livePitch   = 1.0f;
 static float trackGain[MAX_PADS];
+
+/* ═══════════════════════════════════════════════════════════════════
+ *  8b. DAISY SEQUENCER  (sample-accurate, BPM clock in AudioCallback)
+ * ═══════════════════════════════════════════════════════════════════ */
+#define DSQ_PATTERNS   8
+#define DSQ_TRACKS    16
+#define DSQ_MAX_STEPS 64
+
+/* 4-byte step descriptor (used in SPI upload packets) */
+struct __attribute__((packed)) DsqStepPkt {
+    uint8_t active;       /* 0 or 1                          */
+    uint8_t velocity;     /* 1-127                           */
+    uint8_t noteLenDiv;   /* 0=full,2=half,4=qtr,8=eighth   */
+    uint8_t probability;  /* 0-100 (100 = always fire)      */
+};
+
+/* Full step state (stored in SDRAM, includes param-locks) */
+struct DsqStepFull {
+    uint8_t  active;
+    uint8_t  velocity;
+    uint8_t  noteLenDiv;
+    uint8_t  probability;
+    /* param locks */
+    bool     cutoffEn;
+    uint16_t cutoffHz;
+    bool     reverbEn;
+    uint8_t  reverbSend;  /* 0-100 */
+    bool     volEn;
+    uint8_t  volume;      /* 0-150 */
+    uint8_t  _pad[1];     /* align to 12 bytes */
+};  /* 12 bytes */
+
+/* 8 patterns × 16 tracks × 64 steps × 12B = ~98 KB → SDRAM */
+DSY_SDRAM_BSS static DsqStepFull dsqSteps[DSQ_PATTERNS][DSQ_TRACKS][DSQ_MAX_STEPS];
+
+struct DaisySeqState {
+    bool     playing;
+    uint8_t  currentPattern;
+    uint8_t  patternLength;    /* 16, 32, or 64         */
+    int16_t  currentStep;      /* -1 = not started      */
+    float    tempo;            /* BPM                   */
+    uint8_t  swingAmount;      /* 0-100                 */
+    bool     trackMuted[DSQ_TRACKS];
+    /* BPM clock (sample counter, updated inside AudioCallback) */
+    uint32_t samplesElapsed;
+    uint32_t samplesPerStep;
+};
+static DaisySeqState dseq;
+
+/* Track → synth engine mapping  (-1 = sampler, 0=808, 1=909, 2=505, 3=303)
+ * Updated via CMD_DSQ_SET_TRACK_ENGINE.  Default: all tracks use sampler. */
+static int8_t dsqTrackEngine[DSQ_TRACKS];
+
+static void DsqUpdateSamplesPerStep() {
+    float t = (dseq.tempo > 1.0f) ? dseq.tempo : 120.0f;
+    /* 16th note = 60/(bpm×4) seconds */
+    float stepSec = 60.0f / (t * 4.0f);
+    dseq.samplesPerStep = (uint32_t)(stepSec * (float)SAMPLE_RATE);
+    if(dseq.samplesPerStep < 64) dseq.samplesPerStep = 64;
+}
+
+static void DsqInit() {
+    /* dsqSteps está en SDRAM (DSY_SDRAM_BSS) que NO se zero-inicializa
+     * al boot en STM32H7. Sin este memset, volEn/reverbEn/cutoffEn pueden
+     * tener basura (=true) con volume/cutoffHz/reverbSend=0, haciendo que
+     * DsqFireStep ponga trackGain[t]=0 al disparar el primer step y
+     * silenciando todos los live pads permanentemente. */
+    memset(dsqSteps, 0, sizeof(dsqSteps));
+    memset(&dseq, 0, sizeof(dseq));
+    /* -1 (0xFF) = todos los tracks en modo sampler por defecto */
+    memset(dsqTrackEngine, (uint8_t)0xFF, sizeof(dsqTrackEngine));
+    dseq.tempo        = 120.0f;
+    dseq.patternLength = 16;
+    dseq.currentStep  = -1;
+    DsqUpdateSamplesPerStep();
+}
 
 /* ═══════════════════════════════════════════════════════════════════
  *  9. PEAKS
@@ -1764,6 +1852,77 @@ static uint8_t ActiveVoices(){
     return c;
 }
 
+/* ─── Daisy Sequencer: fire all active steps for the current step index ───
+ * Called from inside AudioCallback — sample-accurate, zero SPI latency.
+ * TriggerPad() is safe to call here: it modifies voices[] before the
+ * per-voice render loop of the SAME sample iteration.                         */
+static void DsqFireStep() {
+    uint8_t pat  = dseq.currentPattern;
+    uint8_t slen = dseq.patternLength;
+    uint8_t step = (uint8_t)((dseq.currentStep % (int)slen + (int)slen) % (int)slen);
+
+    for(int t = 0; t < DSQ_TRACKS; t++){
+        if(dseq.trackMuted[t]) continue;
+        DsqStepFull& s = dsqSteps[pat][t][step];
+        if(!s.active || s.velocity == 0) continue;
+
+        int8_t  eng     = dsqTrackEngine[t];
+        bool    isSynth = (eng >= 0 && eng <= 3);
+
+        /* Tracks de sampler: verificar que hay muestra cargada */
+        if(!isSynth && !sampleLoaded[t]) continue;
+
+        /* Probability gate */
+        if(s.probability < 100){
+            if((uint8_t)(FastRand() % 100) >= s.probability) continue;
+        }
+
+        float vel = s.velocity / 127.0f;
+
+        if(!isSynth){
+            /* ── SAMPLER TRACK ── */
+            uint32_t maxS = 0;
+            if(s.noteLenDiv >= 2){
+                float stepSec = 60.0f / (dseq.tempo * 4.0f);
+                float noteSec = stepSec * (4.0f / (float)s.noteLenDiv);
+                maxS = (uint32_t)(noteSec * (float)SAMPLE_RATE);
+            }
+            /* Param locks (solo aplican a tracks de sampler) */
+            if(s.cutoffEn){
+                float f = clampF((float)s.cutoffHz, 20.f, 20000.f);
+                trkFilter[t].SetType(FTYPE_LOWPASS, f, trkFilterQ[t], (float)SAMPLE_RATE);
+                trkFilterType[t] = FTYPE_LOWPASS;
+                trkFilterCut[t]  = f;
+            }
+            if(s.reverbEn)
+                trackReverbSend[t] = clampF(s.reverbSend / 100.0f, 0.f, 1.f);
+            if(s.volEn)
+                trackGain[t] = VolumeByteToGain(s.volume);
+            TriggerPad((uint8_t)t, s.velocity, 100, 0, maxS, seqVolume);
+        } else {
+            /* ── SYNTH ENGINE TRACK (808/909/505/303) ── */
+            switch(eng){
+                case SYNTH_ENGINE_808:
+                    if(t < 16) synth808.Trigger(padTo808[t], vel);
+                    break;
+                case SYNTH_ENGINE_909:
+                    if(t < 16) synth909.Trigger(padTo909[t], vel);
+                    break;
+                case SYNTH_ENGINE_505:
+                    if(t < 16) synth505.Trigger(padTo505[t], vel);
+                    break;
+                case SYNTH_ENGINE_303: {
+                    uint8_t note   = (t < 16) ? padTo303Midi[t] : 48;
+                    bool    accent = (vel > 0.85f);
+                    bool    slide  = false;
+                    acid303.NoteOn(note, accent, slide);
+                    break;
+                }
+            }
+        }
+    }
+}
+
 /* Forward decl – definida más abajo, pero la llamamos desde AudioCallback */
 static void SpiDrainRxToRing();
 
@@ -1804,6 +1963,23 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
          *    durante el audio callback.  DMA audio tiene prioridad máxima (0)
          *    así que TIM6 NO puede preemptar → debemos drenar aquí.          */
         if((i & 3) == 0) SpiDrainRxToRing();
+
+        /* ── Daisy Sequencer tick (sample-accurate BPM clock) ─────────────
+         *  samplesElapsed==0 → new step boundary: advance and fire.
+         *  Called BEFORE voice rendering so new voices are active this sample. */
+        if(dseq.playing){
+            if(dseq.samplesElapsed == 0){
+                dseq.currentStep = (dseq.currentStep + 1) % (int16_t)dseq.patternLength;
+                DsqFireStep();
+            }
+            dseq.samplesElapsed++;
+            /* Swing: odd steps delayed */
+            uint32_t thr = dseq.samplesPerStep;
+            if(dseq.swingAmount > 0 && (dseq.currentStep & 1) == 1)
+                thr = dseq.samplesPerStep + (dseq.samplesPerStep * (uint32_t)dseq.swingAmount / 200u);
+            if(dseq.samplesElapsed >= thr)
+                dseq.samplesElapsed = 0;
+        }
 
         float busL = 0, busR = 0;
         float reverbBusL = 0, delayBusL = 0, chorusBusL = 0;
@@ -2324,6 +2500,8 @@ static void ProcessCommand()
         if(len >= 4){
             float bpm; memcpy(&bpm, p, 4);
             transportBpm = clampF(bpm, 40.0f, 300.0f);
+            dseq.tempo = transportBpm;   /* sync DSQ clock */
+            DsqUpdateSamplesPerStep();
         }
         break;
 
@@ -3513,6 +3691,118 @@ static void ProcessCommand()
         }
         break;
 
+    /* ════════════════════════════════════════════════════════
+     *  DAISY SEQUENCER (0xD0-0xD8)
+     * ════════════════════════════════════════════════════════ */
+    case CMD_DSQ_UPLOAD_TRACK:
+        /* [pat(1), trk(1), stepCount(1), rsvd(1)] + stepCount × DsqStepPkt(4) */
+        if(len >= 4){
+            uint8_t pat  = p[0] & 7;
+            uint8_t trk  = p[1] & 15;
+            uint8_t cnt  = p[2];
+            if(cnt > DSQ_MAX_STEPS) cnt = DSQ_MAX_STEPS;
+            const DsqStepPkt* sp = (const DsqStepPkt*)(p + 4);
+            for(uint8_t i = 0; i < cnt && (4 + i*4 + 4) <= len; i++){
+                DsqStepFull& dst = dsqSteps[pat][trk][i];
+                dst.active     = sp[i].active ? 1 : 0;
+                dst.velocity   = sp[i].velocity;
+                dst.noteLenDiv = sp[i].noteLenDiv;
+                dst.probability = sp[i].probability ? sp[i].probability : 100;
+                /* param locks preserved — only reset on full pattern clear */
+            }
+        }
+        break;
+
+    case CMD_DSQ_SET_STEP:
+        /* [pat,trk,step,active,vel,div,prob,rsvd] */
+        if(len >= 8){
+            uint8_t pat  = p[0] & 7;
+            uint8_t trk  = p[1] & 15;
+            uint8_t step = p[2];
+            if(step < DSQ_MAX_STEPS){
+                DsqStepFull& s = dsqSteps[pat][trk][step];
+                s.active       = p[3] ? 1 : 0;
+                s.velocity     = p[4] ? p[4] : 100;
+                s.noteLenDiv   = p[5];
+                s.probability  = p[6] ? p[6] : 100;
+            }
+        }
+        break;
+
+    case CMD_DSQ_CONTROL:
+        /* [0=stop, 1=play, 2=reset] */
+        if(len >= 1){
+            if(p[0] == 1){
+                dseq.samplesElapsed = 0;
+                dseq.currentStep    = -1;
+                dseq.playing        = true;
+            } else if(p[0] == 0){
+                dseq.playing = false;
+            } else if(p[0] == 2){
+                dseq.playing        = false;
+                dseq.currentStep    = -1;
+                dseq.samplesElapsed = 0;
+            }
+        }
+        break;
+
+    case CMD_DSQ_SELECT_PATTERN:
+        if(len >= 1) dseq.currentPattern = p[0] & 7;
+        break;
+
+    case CMD_DSQ_SET_LENGTH:
+        if(len >= 1){
+            uint8_t l = p[0];
+            if(l == 16 || l == 32 || l == 64) dseq.patternLength = l;
+        }
+        break;
+
+    case CMD_DSQ_SET_MUTE:
+        if(len >= 2 && p[0] < DSQ_TRACKS)
+            dseq.trackMuted[p[0]] = (bool)p[1];
+        break;
+
+    case CMD_DSQ_GET_POS:
+        /* Respond with [step(1), pattern(1), playing(1), rsvd(1)] */
+        {
+            uint8_t resp[4] = {
+                (uint8_t)((dseq.currentStep < 0) ? 0 : (uint8_t)dseq.currentStep),
+                dseq.currentPattern,
+                dseq.playing ? 1u : 0u,
+                0
+            };
+            BuildResponse(CMD_DSQ_GET_POS, hdr->sequence, resp, sizeof(resp));
+        }
+        return;  /* BuildResponse is called → skip default no-response path */
+
+    case CMD_DSQ_SET_SWING:
+        if(len >= 1) dseq.swingAmount = p[0] > 100 ? 100 : p[0];
+        break;
+
+    case CMD_DSQ_SET_PARAM_LOCK:
+        /* [pat,trk,step, cutoffEn,cutHi,cutLo, reverbEn,reverb, volEn,vol, rsvd,rsvd] */
+        if(len >= 12){
+            uint8_t pat  = p[0] & 7;
+            uint8_t trk  = p[1] & 15;
+            uint8_t step = p[2];
+            if(step < DSQ_MAX_STEPS){
+                DsqStepFull& s = dsqSteps[pat][trk][step];
+                s.cutoffEn  = (bool)p[3];
+                s.cutoffHz  = ((uint16_t)p[4] << 8) | p[5];
+                s.reverbEn  = (bool)p[6];
+                s.reverbSend = p[7];
+                s.volEn     = (bool)p[8];
+                s.volume    = p[9];
+            }
+        }
+        break;
+
+    case CMD_DSQ_SET_TRACK_ENGINE:
+        /* [track(1), engine(1)]  engine: 0xFF/-1=sampler, 0=808, 1=909, 2=505, 3=303 */
+        if(len >= 2 && p[0] < DSQ_TRACKS)
+            dsqTrackEngine[p[0]] = (int8_t)p[1]; /* 0xFF → -1 via cast */
+        break;
+
     default: break;
     }
 }
@@ -4401,6 +4691,11 @@ int main()
     {
         Log("UART1: DESHABILITADO (modo standalone demo)");
     }
+
+    /* ── Inicializar secuenciador Daisy ── */
+    DsqInit();
+    Log("DsqInit: %d patrones x %d tracks x %d steps en SDRAM",
+        DSQ_PATTERNS, DSQ_TRACKS, DSQ_MAX_STEPS);
 
     /* ── Start Audio ── */
     if(kEnableAudioStart)
