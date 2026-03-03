@@ -370,6 +370,7 @@ struct Voice {
     float    speed;
     float    gainL;
     float    gainR;
+    float    baseGain; // gain antes del pan — actualizado por LFO vol/pan en tiempo real
     float    env;
     float    envAttackInc;
     float    envDecayCoef;
@@ -624,6 +625,7 @@ static uint32_t gSrCounter = 0;
 static bool  padLoop[MAX_PADS];
 static bool  padReverse[MAX_PADS];
 static float padPitch[MAX_PADS];
+static int16_t trkPitchCents[MAX_PADS];  // modulación de pitch por track en centésimas (LFO / UI)
 
 /* Pad filter */
 static BiquadEQ  padFilter[MAX_PADS];
@@ -633,6 +635,7 @@ static float   padFilterQ[MAX_PADS];
 
 /* Pad distortion + bitcrush */
 static float   padDistDrive[MAX_PADS];
+static uint8_t padDistMode[MAX_PADS];   // 0=soft 1=hard 2=tube(asymm) 3=fuzz
 static uint8_t padBitDepth[MAX_PADS];
 
 /* Stutter */
@@ -1753,10 +1756,15 @@ static void RunStartup808SelfTest(uint32_t nowMs)
     }
 }
 
-static float MySoftClip(float x){
-    if(x >  1.5f) return  1.0f;
-    if(x < -1.5f) return -1.0f;
-    return x - (x*x*x)/6.75f;
+/* AudioNoise (torvalds/AudioNoise): fast tanh approx x/(1+|x|), more stable
+ * than polynomial and avoids dangerous overshoot above ±1.5.          */
+static inline float MySoftClip(float x){ return x / (1.0f + fabsf(x)); }
+/* Asymmetric clip — tube-like even harmonics (AudioNoise/distortion.h)
+ * positive: soft / negative: softer → breaks waveform symmetry → warm tone */
+static inline float AsymClip(float x){
+    if(x >= 0.0f) return x / (1.0f + fabsf(x));
+    float n = x * 0.7f;
+    return (n / (1.0f + fabsf(n))) * 0.7f;
 }
 
 static float ApplyDist(float s, float drive, uint8_t mode){
@@ -1766,8 +1774,8 @@ static float ApplyDist(float s, float drive, uint8_t mode){
     switch(mode){
         case DMODE_SOFT: s = MySoftClip(s); break;
         case DMODE_HARD: s = clampF(s,-1.f,1.f); break;
-        case DMODE_TUBE: s = tanhf(s); break;
-        case DMODE_FUZZ:
+        case DMODE_TUBE: s = AsymClip(s); break;  // asimétrico tube (AudioNoise)
+        case DMODE_FUZZ:  // fold-back fuzz
             while(s >  1.f || s < -1.f){
                 if(s >  1.f) s =  2.f - s;
                 if(s < -1.f) s = -2.f - s;
@@ -1823,12 +1831,13 @@ static void TriggerPad(uint8_t pad, uint8_t velocity,
     float gL = gain * (1.0f - clampF(panF, 0.f, 1.f));
     float gR = gain * (1.0f + clampF(panF, -1.f, 0.f));
 
-    voices[slot].active = true;
-    voices[slot].pad    = pad;
-    voices[slot].pos    = padReverse[pad] ? (float)(sampleLength[pad] - 1) : 0.0f;
-    voices[slot].speed  = padPitch[pad];
-    voices[slot].gainL  = gL;
-    voices[slot].gainR  = gR;
+    voices[slot].active   = true;
+    voices[slot].pad      = pad;
+    voices[slot].pos      = padReverse[pad] ? (float)(sampleLength[pad] - 1) : 0.0f;
+    voices[slot].speed    = padPitch[pad] * powf(2.0f, trkPitchCents[pad] / 1200.0f);
+    voices[slot].baseGain = gain;  // gain pre-pan — para LFO vol/pan live update
+    voices[slot].gainL    = gL;
+    voices[slot].gainR    = gR;
     if(trkEnvAdActive[pad]){
         float atkMs = clampF(trkEnvAttackMs[pad], 0.0f, 2000.0f);
         voices[slot].env = (atkMs <= 0.01f) ? 1.0f : 0.0f;
@@ -2107,7 +2116,7 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
             }
 
             /* ── Pad distortion + crush ── */
-            s = ApplyDist(s, padDistDrive[p], DMODE_SOFT);
+            s = ApplyDist(s, padDistDrive[p], padDistMode[p]);
             s = BitCrush(s, padBitDepth[p]);
 
             /* ── Scratch FX ── */
@@ -2488,7 +2497,24 @@ static void ProcessCommand()
         if(len >= 1) liveVolume = VolumeByteToGain(p[0]);
         break;
     case CMD_TRACK_VOLUME:
-        if(len >= 2 && p[0] < MAX_PADS) trackGain[p[0]] = VolumeByteToGain(p[1]);
+        if(len >= 2 && p[0] < MAX_PADS) {
+            uint8_t t = p[0];
+            float oldGain = trackGain[t];
+            float newGain = VolumeByteToGain(p[1]);
+            trackGain[t] = newGain;
+            /* Actualizar voces activas del pad (para LFO vol en tiempo real) */
+            if(oldGain > 1e-6f) {
+                float ratio = newGain / oldGain;
+                float panF  = trackPanF[t];
+                for(int v = 0; v < MAX_VOICES; v++) {
+                    if(voices[v].active && voices[v].pad == t) {
+                        voices[v].baseGain *= ratio;
+                        voices[v].gainL = voices[v].baseGain * (1.0f - clampF(panF, 0.f, 1.f));
+                        voices[v].gainR = voices[v].baseGain * (1.0f + clampF(panF, -1.f, 0.f));
+                    }
+                }
+            }
+        }
         break;
     case CMD_LIVE_PITCH:
         if(len >= 4){
@@ -2751,9 +2777,13 @@ static void ProcessCommand()
         }
         break;
     case CMD_TRACK_DISTORTION:
-        if(len >= 5 && p[0] < MAX_PADS){
-            float d; memcpy(&d, p + 1, 4);
-            trkDistDrive[p[0]] = clampF(d, 0.f, 1.f);
+        /* PadDistortionPayload: [track, distMode, rsvd×2, float amount(4B)] — 8B */
+        if(len >= 8 && p[0] < MAX_PADS){
+            uint8_t t = p[0];
+            trkDistMode[t] = p[1];                    // modo desde byte 1
+            float d; memcpy(&d, p + 4, 4);            // amount desde bytes 4-7
+            if(d > 1.0f) d /= 100.0f;                // normalizar porcentaje→fracción
+            trkDistDrive[t] = clampF(d, 0.f, 1.f);
         } else if(len >= 2 && p[0] < MAX_PADS){
             trkDistDrive[p[0]] = p[1] / 255.0f;
         }
@@ -2861,8 +2891,18 @@ static void ProcessCommand()
             trackChorusSend[p[0]] = p[1] / 100.0f;
         break;
     case CMD_TRACK_PAN:
-        if(len >= 2 && p[0] < MAX_PADS)
-            trackPanF[p[0]] = (int8_t)p[1] / 100.0f;
+        if(len >= 2 && p[0] < MAX_PADS) {
+            uint8_t t = p[0];
+            trackPanF[t] = (int8_t)p[1] / 100.0f;
+            float panF = trackPanF[t];
+            /* Actualizar voces activas del pad (para LFO pan en tiempo real) */
+            for(int v = 0; v < MAX_VOICES; v++) {
+                if(voices[v].active && voices[v].pad == t) {
+                    voices[v].gainL = voices[v].baseGain * (1.0f - clampF(panF, 0.f, 1.f));
+                    voices[v].gainR = voices[v].baseGain * (1.0f + clampF(panF, -1.f, 0.f));
+                }
+            }
+        }
         break;
     case CMD_TRACK_MUTE:
         if(len >= 2 && p[0] < MAX_PADS)
@@ -2902,7 +2942,9 @@ static void ProcessCommand()
 
     /* ── Track Phaser / Tremolo / Pitch / Gate ── */
     case CMD_TRACK_PHASER:
-        /* reservado para futuro (phaser per-track dedicado) */
+        /* NO IMPLEMENTADO: phaser dedicado por track requiere allpass
+         * chain por canal, demasiado costoso con MAX_PADS=16.
+         * El phaser maestro global (0x35) sí está activo.         */
         break;
     case CMD_TRACK_TREMOLO:
         /* LFO interno por track (Daisy soberana en modulación)
@@ -2932,11 +2974,26 @@ static void ProcessCommand()
         }
         break;
     case CMD_TRACK_PITCH:
+        /* Pitch shift por track en centésimas (-1200..+1200)
+         * Payload: [uint8_t track, uint8_t reserved, int16_t cents] (4 bytes) */
+        if(len >= 4 && p[0] < MAX_PADS){
+            uint8_t t = p[0];
+            int16_t cents = 0;
+            memcpy(&cents, p + 2, 2);
+            trkPitchCents[t] = cents;
+            /* Actualizar voces activas del pad en tiempo real (LFO modulation) */
+            float spd = padPitch[t] * powf(2.0f, cents / 1200.0f);
+            for(int v = 0; v < MAX_VOICES; v++){
+                if(voices[v].active && voices[v].pad == (uint8_t)t)
+                    voices[v].speed = spd;
+            }
+        }
+        break;
     case CMD_TRACK_GATE:
         /* Track AD gate/envelope para sampler voices
          * Legacy (2B): [track, active]
          * Extended (10B): [track, active, attackMs(float), decayMs(float)] */
-        if(hdr->cmd == CMD_TRACK_GATE && len >= 2 && p[0] < MAX_PADS){
+        if(len >= 2 && p[0] < MAX_PADS){
             uint8_t t = p[0];
             trkEnvAdActive[t] = (p[1] != 0);
 
@@ -2979,9 +3036,13 @@ static void ProcessCommand()
         }
         break;
     case CMD_PAD_DISTORTION:
-        if(len >= 5 && p[0] < MAX_PADS){
-            float d; memcpy(&d, p + 1, 4);
-            padDistDrive[p[0]] = clampF(d, 0.f, 1.f);
+        /* PadDistortionPayload: [pad, distMode, rsvd×2, float amount(4B)] — 8B */
+        if(len >= 8 && p[0] < MAX_PADS){
+            uint8_t pad2 = p[0];
+            padDistMode[pad2] = p[1];                  // modo desde byte 1
+            float d; memcpy(&d, p + 4, 4);             // amount desde bytes 4-7
+            if(d > 1.0f) d /= 100.0f;                 // normalizar porcentaje→fracción
+            padDistDrive[pad2] = clampF(d, 0.f, 1.f);
         } else if(len >= 2 && p[0] < MAX_PADS){
             padDistDrive[p[0]] = p[1] / 255.0f;
         }
@@ -3048,8 +3109,8 @@ static void ProcessCommand()
         if(len >= 1 && p[0] < MAX_PADS){
             uint8_t pad = p[0];
             padFilterType[pad] = 0; padFilter[pad].Reset();
-            padDistDrive[pad]  = 0; padBitDepth[pad] = 16;
-            padLoop[pad] = false; padReverse[pad] = false; padPitch[pad] = 1.0f;
+            padDistDrive[pad] = 0; padDistMode[pad] = 0; padBitDepth[pad] = 16;
+            padLoop[pad] = false; padReverse[pad] = false; padPitch[pad] = 1.0f; trkPitchCents[pad] = 0;
             padStutterOn[pad] = false; padScratchOn[pad] = false; padTurnOn[pad] = false;
         }
         break;
@@ -3451,8 +3512,8 @@ static void ProcessCommand()
         for(int i = 0; i < MAX_PADS; i++){
             sampleLoaded[i] = false; sampleLength[i] = 0;
             trackGain[i]    = 1.0f;  trackPeak[i] = 0;
-            padLoop[i] = false; padReverse[i] = false; padPitch[i] = 1.0f;
-            padFilterType[i] = 0; padDistDrive[i] = 0; padBitDepth[i] = 16;
+            padLoop[i] = false; padReverse[i] = false; padPitch[i] = 1.0f; trkPitchCents[i] = 0;
+            padFilterType[i] = 0; padDistDrive[i] = 0; padDistMode[i] = 0; padBitDepth[i] = 16;
             padStutterOn[i] = false; padScratchOn[i] = false; padTurnOn[i] = false;
             trkFilterType[i] = 0; trkDistDrive[i] = 0; trkBitDepth[i] = 16;
             trkEchoActive[i] = false; trkFlgActive[i] = false; trkCompActive[i] = false;
@@ -4410,10 +4471,12 @@ static void InitArrays()
         padLoop[i]    = false;
         padReverse[i] = false;
         padPitch[i]   = 1.0f;
+        trkPitchCents[i] = 0;
         padFilterType[i] = 0;
         padFilterCut[i]  = 10000.f;
         padFilterQ[i]    = 0.707f;
         padDistDrive[i]  = 0;
+        padDistMode[i]   = 0;
         padBitDepth[i]   = 16;
         padStutterOn[i]  = false;
         padScratchOn[i]  = false;
