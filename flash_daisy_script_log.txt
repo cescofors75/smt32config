@@ -1,4 +1,4 @@
-=== FLASH DAISY 2026-03-03T18:31:20 ===
+=== FLASH DAISY 2026-03-07T21:07:34 ===
 DFU detectado en t=0s
 dfu-util 0.11
 
@@ -50,11 +50,12 @@ Erase    done.
 
 Download	[                         ]   0%            0 bytes
 Download	[=                        ]   4%         6144 bytes
-Download	[=                        ]   6%         8192 bytes
+Download	[=                        ]   5%         7168 bytes
 Download	[==                       ]   8%        11264 bytes
+Download	[==                       ]  11%        15360 bytes
 Download	[===                      ]  12%        16384 bytes
 Download	[====                     ]  16%        21504 bytes
-Download	[====                     ]  19%        25600 bytes
+Download	[====                     ]  18%        24576 bytes
 Download	[=====                    ]  20%        26624 bytes
 Download	[======                   ]  24%        31744 bytes
 Download	[======                   ]  25%        32768 bytes
@@ -62,12 +63,14 @@ Download	[=======                  ]  28%        36864 bytes
 Download	[=======                  ]  31%        40960 bytes
 Download	[========                 ]  32%        41984 bytes
 Download	[=========                ]  36%        47104 bytes
-Download	[=========                ]  37%        49152 bytes
+Download	[=========                ]  36%        48128 bytes
 Download	[==========               ]  40%        52224 bytes
+Download	[==========               ]  43%        56320 bytes
 Download	[===========              ]  44%        57344 bytes
 Download	[============             ]  48%        63488 bytes
-Download	[============             ]  50%        65536 bytes
+Download	[============             ]  49%        64512 bytes
 Download	[=============            ]  52%        68608 bytes
+Download	[=============            ]  55%        72704 bytes
 Download	[==============           ]  56%        73728 bytes
 Download	[===============          ]  60%        78848 bytes
 Download	[===============          ]  62%        81920 bytes
@@ -80,12 +83,10 @@ Download	[===================      ]  76%        99328 bytes
 Download	[====================     ]  80%       104448 bytes
 Download	[====================     ]  81%       106496 bytes
 Download	[=====================    ]  84%       109568 bytes
-Download	[=====================    ]  87%       113664 bytes
 Download	[======================   ]  88%       114688 bytes
 Download	[=======================  ]  92%       119808 bytes
-Download	[=======================  ]  93%       121856 bytes
+Download	[=======================  ]  94%       122880 bytes
 Download	[======================== ]  96%       125952 bytes
-Download	[======================== ]  99%       130048 bytes
 Download	[=========================] 100%       130188 bytes
 Download done.
 File downloaded successfully
@@ -111,66 +112,64 @@ DFU state(2) = dfuIDLE, status(0) = No error condition is present
 DFU mode device DFU version 011a
 Device returned transfer size 4096
 DfuSe interface name: "Flash "
-Downloading element to address = 0x90040000, size = 197652
+Downloading element to address = 0x90040000, size = 212872
 
 Erase   	[                         ]   0%            0 bytes
-Erase   	[=                        ]   4%         8192 bytes
-Erase   	[==                       ]   8%        16384 bytes
-Erase   	[===                      ]  12%        24576 bytes
-Erase   	[====                     ]  16%        32768 bytes
-Erase   	[=====                    ]  20%        40960 bytes
-Erase   	[======                   ]  24%        49152 bytes
-Erase   	[=======                  ]  29%        57344 bytes
-Erase   	[========                 ]  33%        65536 bytes
-Erase   	[=========                ]  37%        73728 bytes
-Erase   	[==========               ]  41%        81920 bytes
-Erase   	[===========              ]  45%        90112 bytes
-Erase   	[============             ]  49%        98304 bytes
-Erase   	[=============            ]  53%       106496 bytes
-Erase   	[==============           ]  58%       114688 bytes
-Erase   	[===============          ]  60%       118784 bytes
-Erase   	[================         ]  64%       126976 bytes
-Erase   	[================         ]  66%       131072 bytes
-Erase   	[=================        ]  68%       135168 bytes
-Erase   	[==================       ]  72%       143360 bytes
-Erase   	[===================      ]  76%       151552 bytes
-Erase   	[====================     ]  80%       159744 bytes
-Erase   	[=====================    ]  84%       167936 bytes
-Erase   	[======================   ]  89%       176128 bytes
-Erase   	[=======================  ]  93%       184320 bytes
-Erase   	[======================== ]  97%       192512 bytes
-Erase   	[======================== ]  99%       196608 bytes
-Erase   	[=========================] 100%       197652 bytes
+Erase   	[=                        ]   5%        12288 bytes
+Erase   	[==                       ]   9%        20480 bytes
+Erase   	[===                      ]  13%        28672 bytes
+Erase   	[====                     ]  17%        36864 bytes
+Erase   	[=====                    ]  21%        45056 bytes
+Erase   	[======                   ]  25%        53248 bytes
+Erase   	[=======                  ]  28%        61440 bytes
+Erase   	[=======                  ]  30%        65536 bytes
+Erase   	[========                 ]  32%        69632 bytes
+Erase   	[=========                ]  36%        77824 bytes
+Erase   	[==========               ]  40%        86016 bytes
+Erase   	[===========              ]  44%        94208 bytes
+Erase   	[============             ]  48%       102400 bytes
+Erase   	[=============            ]  53%       114688 bytes
+Erase   	[==============           ]  57%       122880 bytes
+Erase   	[===============          ]  61%       131072 bytes
+Erase   	[================         ]  65%       139264 bytes
+Erase   	[=================        ]  69%       147456 bytes
+Erase   	[==================       ]  73%       155648 bytes
+Erase   	[===================      ]  76%       163840 bytes
+Erase   	[====================     ]  80%       172032 bytes
+Erase   	[=====================    ]  84%       180224 bytes
+Erase   	[======================   ]  88%       188416 bytes
+Erase   	[=======================  ]  92%       196608 bytes
+Erase   	[======================== ]  96%       204800 bytes
+Erase   	[=========================] 100%       212872 bytes
 Erase    done.
 
 Download	[                         ]   0%            0 bytes
-Download	[                         ]   2%         4096 bytes
-Download	[=                        ]   4%         8192 bytes
-Download	[==                       ]   8%        16384 bytes
-Download	[===                      ]  12%        24576 bytes
-Download	[====                     ]  16%        32768 bytes
-Download	[=====                    ]  20%        40960 bytes
-Download	[======                   ]  24%        49152 bytes
-Download	[=======                  ]  29%        57344 bytes
-Download	[========                 ]  33%        65536 bytes
-Download	[=========                ]  37%        73728 bytes
-Download	[==========               ]  41%        81920 bytes
-Download	[===========              ]  45%        90112 bytes
-Download	[============             ]  49%        98304 bytes
-Download	[=============            ]  53%       106496 bytes
-Download	[==============           ]  58%       114688 bytes
-Download	[===============          ]  60%       118784 bytes
-Download	[================         ]  64%       126976 bytes
-Download	[================         ]  66%       131072 bytes
-Download	[=================        ]  68%       135168 bytes
-Download	[==================       ]  72%       143360 bytes
-Download	[===================      ]  76%       151552 bytes
-Download	[====================     ]  80%       159744 bytes
-Download	[=====================    ]  84%       167936 bytes
-Download	[======================   ]  89%       176128 bytes
-Download	[=======================  ]  93%       184320 bytes
-Download	[======================== ]  97%       192512 bytes
-Download	[=========================] 100%       197652 bytes
+Download	[                         ]   1%         4096 bytes
+Download	[=                        ]   5%        12288 bytes
+Download	[==                       ]   9%        20480 bytes
+Download	[===                      ]  13%        28672 bytes
+Download	[====                     ]  17%        36864 bytes
+Download	[=====                    ]  21%        45056 bytes
+Download	[======                   ]  25%        53248 bytes
+Download	[=======                  ]  28%        61440 bytes
+Download	[========                 ]  32%        69632 bytes
+Download	[=========                ]  36%        77824 bytes
+Download	[==========               ]  40%        86016 bytes
+Download	[===========              ]  44%        94208 bytes
+Download	[============             ]  48%       102400 bytes
+Download	[=============            ]  53%       114688 bytes
+Download	[==============           ]  57%       122880 bytes
+Download	[===============          ]  61%       131072 bytes
+Download	[================         ]  65%       139264 bytes
+Download	[=================        ]  69%       147456 bytes
+Download	[==================       ]  73%       155648 bytes
+Download	[===================      ]  76%       163840 bytes
+Download	[====================     ]  80%       172032 bytes
+Download	[=====================    ]  84%       180224 bytes
+Download	[======================   ]  88%       188416 bytes
+Download	[=======================  ]  92%       196608 bytes
+Download	[======================== ]  96%       204800 bytes
+Download	[=========================] 100%       212872 bytes
 Download done.
 File downloaded successfully
 Warning: Invalid DFU suffix signature

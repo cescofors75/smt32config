@@ -64,11 +64,12 @@ static inline float FastTanh(float x) {
     return x * (27.0f + x2) / (27.0f + 9.0f * x2);
 }
 
-/* Curva de velocidad smoothstep
- * v=0->0  v=0.5->~0.7  v=1->1  mas natural que lineal */
+/* Curva de velocidad logaritmica (E1)
+ * v=0->0  v=0.25->0.48  v=0.5->0.70  v=1->1
+ * Los golpes suaves suenan organicos: log(1+9v)/log(10) */
 static inline float VelCurve(float v) {
     v = Clamp(v, 0.0f, 1.0f);
-    return v * v * (3.0f - 2.0f * v);
+    return logf(1.0f + v * 9.0f) * 0.43429448190f;  /* /log(10) */
 }
 
 /* ---------------------------------------------------------------------
@@ -179,11 +180,14 @@ public:
     float drive      = 0.3f;
     float subLevel   = 0.15f;
     float volume     = 1.0f;
+    float drift      = 0.15f;  /* A4: analog pitch drift [0..1] */
 
     void Init(float sampleRate) {
         sr_ = sampleRate;
         dt_ = 1.0f / sr_;
-        active_ = false;
+        active_      = false;
+        driftPhase_  = 0.0f;
+        driftOffset_ = 0.0f;
         clickFilter_.SetCoefs(sr_, 3500.0f, 0.8f);
         rng_.Seed(0xBD808000u);
     }
@@ -194,6 +198,11 @@ public:
         phase_    = 0.0f;
         subPhase_ = 0.0f;
         vel_      = VelCurve(velocity);
+        /* A4: random pitch offset per trigger */
+        if (drift > 0.001f) {
+            float r = ((float)(int32_t)(rng_.Next() & 0xFFFF)) / 65535.0f * 2.0f - 1.0f;
+            driftOffset_ = r * drift * 0.006f;  /* ±0.6% ~ ±10 cents max */
+        }
         clickFilter_.Reset();
         rng_.Seed(0xBD808000u ^ (uint32_t)(vel_ * 65535));
     }
@@ -201,7 +210,16 @@ public:
     float Process() {
         if (!active_) return 0.0f;
 
-        float cp = pitch + pitch * pitchAmt * expf(-time_ / pitchDecay);
+        /* A4: slow drift oscillator 0.3-1.5 Hz */
+        float driftMod = 0.0f;
+        if (drift > 0.001f) {
+            driftPhase_ += (0.3f + drift * 1.2f) * dt_;
+            if (driftPhase_ >= 1.0f) driftPhase_ -= 1.0f;
+            driftMod = sinf(6.283185f * driftPhase_) * drift * 0.003f;
+        }
+
+        float pitchEff = pitch * (1.0f + driftOffset_ + driftMod);
+        float cp = pitchEff + pitchEff * pitchAmt * expf(-time_ / pitchDecay); /* A2: ya exponencial */
 
         phase_ += cp * dt_;
         if (phase_ >= 1.0f) phase_ -= 1.0f;
@@ -233,11 +251,14 @@ public:
     void SetPitch(float p)      { pitch      = Clamp(p, 30.0f, 120.0f);  }
     void SetDrive(float d)      { drive      = Clamp(d, 0.0f,  1.0f);    }
     void SetPitchDecay(float d) { pitchDecay = Clamp(d, 0.01f, 0.5f);    }
+    void SetDrift(float d)      { drift      = Clamp(d, 0.0f,  1.0f);    } /* A4 */
 
 private:
     float sr_ = 48000.0f, dt_ = 1.0f / 48000.0f;
     bool  active_ = false;
     float time_ = 0.0f, phase_ = 0.0f, subPhase_ = 0.0f, vel_ = 1.0f;
+    float driftPhase_  = 0.0f;
+    float driftOffset_ = 0.0f;
     SVF   clickFilter_;
     Rng   rng_;
 };
@@ -257,12 +278,17 @@ public:
     float snappy = 0.6f;
     float pitch  = 185.0f;
     float volume = 1.0f;
+    float drift  = 0.10f;  /* A4: analog drift [0..1] */
 
     void Init(float sampleRate) {
         sr_ = sampleRate;
         dt_ = 1.0f / sr_;
         active_ = false;
-        noiseFilter_.SetCoefs(sr_, 5200.0f, 1.2f);
+        driftPhase_  = 0.0f;
+        driftOffset_ = 0.0f;
+        /* A5: noise a dos filtros BP para sonido mas rico */
+        noiseFilter_.SetCoefs(sr_, 5200.0f, 1.4f);
+        snpFilter_.SetCoefs(sr_, 2800.0f, 0.9f);
         rng_.Seed(0xA1B2C3D4u);
     }
 
@@ -271,19 +297,37 @@ public:
         time_    = 0.0f;
         phase1_  = phase2_ = 0.0f;
         vel_     = VelCurve(velocity);
-        noiseFilter_.SetCoefs(sr_, pitch * 28.0f, 1.2f);
+        /* A4: drift per trigger */
+        if (drift > 0.001f) {
+            float r = ((float)(int32_t)(rng_.Next() & 0xFFFF)) / 65535.0f * 2.0f - 1.0f;
+            driftOffset_ = r * drift * 0.005f;
+        }
+        /* A5: colored noise - BP freq tracks snare pitch para coherencia timbrica */
+        float bpFreq  = pitch * (28.0f + tone * 12.0f);   /* 5200-8400 Hz */
+        float bpFreq2 = pitch * (15.0f + tone * 8.0f);    /* 2800-4280 Hz */
+        noiseFilter_.SetCoefs(sr_, Clamp(bpFreq, 300.f, sr_*0.45f), 1.4f + snappy * 0.8f);
+        snpFilter_.SetCoefs(sr_,  Clamp(bpFreq2, 200.f, sr_*0.45f), 0.9f + snappy * 0.6f);
         noiseFilter_.Reset();
+        snpFilter_.Reset();
         rng_.Seed(0xA1B2C3D4u ^ (uint32_t)(velocity * 1234));
     }
 
     float Process() {
         if (!active_) return 0.0f;
 
-        phase1_ += pitch * dt_;
+        /* A4: drift oscilador lento en snare */
+        float pitchEff = pitch * (1.0f + driftOffset_);
+        if (drift > 0.001f) {
+            driftPhase_ += (0.4f + drift) * dt_;
+            if (driftPhase_ >= 1.0f) driftPhase_ -= 1.0f;
+            pitchEff *= (1.0f + sinf(6.283185f * driftPhase_) * drift * 0.002f);
+        }
+
+        phase1_ += pitchEff * dt_;
         if (phase1_ >= 1.0f) phase1_ -= 1.0f;
         float t1 = sinf(TR808_TWOPI * phase1_);
 
-        phase2_ += pitch * 1.833f * dt_;
+        phase2_ += pitchEff * 1.833f * dt_;
         if (phase2_ >= 1.0f) phase2_ -= 1.0f;
         float t2 = sinf(TR808_TWOPI * phase2_);
 
@@ -291,7 +335,10 @@ public:
         float toneOut  = (t1 * 0.65f + t2 * 0.35f) * toneEnv * tone;
 
         float snapEnv  = expf(-time_ / (decay * 0.9f));
-        float noiseOut = noiseFilter_.ProcessBP(rng_.White()) * snapEnv * snappy;
+        float nRaw = rng_.White();
+        /* A5: dos filtros BP con freq distintas para ruido con mas caracter */
+        float noiseOut = (noiseFilter_.ProcessBP(nRaw) * 0.65f
+                        + snpFilter_.ProcessBP(nRaw)   * 0.35f) * snapEnv * snappy;
 
         float output = FastTanh((toneOut + noiseOut) * 1.4f);
 
@@ -306,12 +353,16 @@ public:
     void SetTone(float t)   { tone   = Clamp(t, 0.0f,  1.0f);    }
     void SetSnappy(float s) { snappy = Clamp(s, 0.0f,  1.0f);    }
     void SetPitch(float p)  { pitch  = Clamp(p, 100.0f, 350.0f); }
+    void SetDrift(float d)  { drift  = Clamp(d, 0.0f,  1.0f);    } /* A4 */
 
 private:
     float sr_ = 48000.0f, dt_ = 1.0f / 48000.0f;
     bool  active_ = false;
     float time_ = 0.0f, phase1_ = 0.0f, phase2_ = 0.0f, vel_ = 1.0f;
+    float driftPhase_  = 0.0f;
+    float driftOffset_ = 0.0f;
     SVF   noiseFilter_;
+    SVF   snpFilter_;  /* A5: segundo filtro BP para colored noise */
     Rng   rng_;
 };
 
@@ -409,13 +460,21 @@ protected:
     float time_   = 0.0f;
     float vel_    = 1.0f;
     float phase_[6] = {};
+    float driftPhase_  = 0.0f;   /* A4 */
+    float driftOffset_ = 0.0f;   /* A4 */
+    float hpFreq_      = 7000.0f;
     Rng   rng_;
     SVF   hpFilter_;
+
+    float driftHat_ = 0.10f;  /* A4: drift para hi-hats [0..1] */
 
     void BaseInit(float sampleRate, float hpFreq) {
         sr_ = sampleRate;
         dt_ = 1.0f / sr_;
         active_ = false;
+        hpFreq_  = hpFreq;
+        driftPhase_ = 0.0f;
+        driftOffset_ = 0.0f;
         hpFilter_.SetCoefs(sr_, hpFreq, 0.7f);
         rng_.Seed(0xBAADF00Du);
     }
@@ -425,14 +484,27 @@ protected:
         time_   = 0.0f;
         vel_    = VelCurve(velocity);
         memset(phase_, 0, sizeof(phase_));
+        /* A4: drift per trigger en las frecuencias metalicas */
+        if (driftHat_ > 0.001f) {
+            driftOffset_ = ((float)(int32_t)(rng_.Next() & 0xFFFF)) / 65535.0f * 2.0f - 1.0f;
+            driftOffset_ *= driftHat_ * 0.012f;  /* ±1.2% = ±~20 cents */
+        }
         hpFilter_.Reset();
         rng_.Seed(0xBAADF00Du ^ (uint32_t)(vel_ * 0xFFFF));
     }
 
     float MetallicCore() {
+        /* A4: drift oscilador lento modulando frecuencias metalicas */
+        float driftMod = 0.0f;
+        if (driftHat_ > 0.001f) {
+            driftPhase_ += (0.2f + driftHat_ * 0.8f) * dt_;
+            if (driftPhase_ >= 1.0f) driftPhase_ -= 1.0f;
+            driftMod = driftOffset_ + sinf(6.283185f * driftPhase_) * driftHat_ * 0.004f;
+        }
         float sum = 0.0f;
         for (int i = 0; i < 6; i++) {
-            phase_[i] += METAL_FREQS[i] * dt_;
+            float freqDrifted = METAL_FREQS[i] * (1.0f + driftMod);
+            phase_[i] += freqDrifted * dt_;
             if (phase_[i] >= 1.0f) phase_[i] -= 1.0f;
             sum += (phase_[i] < 0.5f) ? 1.0f : -1.0f;
         }

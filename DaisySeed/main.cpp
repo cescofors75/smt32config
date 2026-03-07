@@ -36,6 +36,8 @@
 #include "synth/tr505.h"
 #include "synth/tb303.h"
 #include "synth/wavetable_osc.h"
+#include "synth/sh101.h"     /* I1: Roland SH-101 monosynth */
+#include "synth/fm2op.h"     /* I2: 2-operator FM Yamaha-style */
 #include "synth/demo_mode.h"
 
 using namespace daisy;
@@ -213,6 +215,8 @@ static DMA_HandleTypeDef  hdma_spi1_tx;
 #define SYNTH_ENGINE_505   2
 #define SYNTH_ENGINE_303   3
 #define SYNTH_ENGINE_WTOSC 4
+#define SYNTH_ENGINE_SH101 5  /* I1: Roland SH-101 monosynth */
+#define SYNTH_ENGINE_FM2OP 6  /* I2: 2-operator FM */
 
 /* Bulk */
 #define CMD_BULK_TRIGGERS     0xF0
@@ -226,9 +230,11 @@ static DMA_HandleTypeDef  hdma_spi1_tx;
 #define CMD_DSQ_SET_LENGTH      0xD4  /* [16/32/64]                                       */
 #define CMD_DSQ_SET_MUTE        0xD5  /* [track, muted 0/1]                               */
 #define CMD_DSQ_GET_POS         0xD6  /* no payload → [step,pat,playing,rsvd]             */
-#define CMD_DSQ_SET_SWING       0xD7  /* [swing 0-100]                                    */
+#define CMD_DSQ_SET_SWING       0xD7  /* [swing 0-100]  (global)                           */
 #define CMD_DSQ_SET_PARAM_LOCK  0xD8  /* [pat,trk,step,cutoffEn,cutHi,cutLo,revEn,rev,volEn,vol,rsvd,rsvd] */
 #define CMD_DSQ_SET_TRACK_ENGINE 0xD9 /* [track(1), engine(1)]  0xFF/-1=sampler 0=808 1=909 2=505 3=303     */
+#define CMD_DSQ_SET_TRACK_SWING  0xDA /* E4: [track(1), swing 0-100(1)] per-track swing                    */
+#define CMD_DSQ_SET_HUMANIZE     0xDB /* E2: [timingMs(1), velocityAmt(1)] humanizacion global              */
 
 /* Filter types */
 #define FTYPE_NONE       0
@@ -240,6 +246,7 @@ static DMA_HandleTypeDef  hdma_spi1_tx;
 #define FTYPE_PEAKING    6
 #define FTYPE_LOWSHELF   7
 #define FTYPE_HIGHSHELF  8
+#define FTYPE_RESONANT   9   /* 4-pole LP: 2 biquads cascaded, Q up to 40, soft saturation */
 
 /* Distortion modes */
 #define DMODE_SOFT  0
@@ -433,13 +440,28 @@ struct DaisySeqState {
     uint8_t  patternLength;    /* 16, 32, or 64         */
     int16_t  currentStep;      /* -1 = not started      */
     float    tempo;            /* BPM                   */
-    uint8_t  swingAmount;      /* 0-100                 */
+    uint8_t  swingAmount;      /* 0-100 (global)        */
     bool     trackMuted[DSQ_TRACKS];
     /* BPM clock (sample counter, updated inside AudioCallback) */
     uint32_t samplesElapsed;
     uint32_t samplesPerStep;
+    /* E2: Humanization timing */
+    uint8_t  humanizeTimingMs; /* 0-5 ms jitter */
+    uint8_t  humanizeVelAmt;   /* 0-50 velocity variation */
 };
 static DaisySeqState dseq;
+
+/* E4: Per-track swing 0-100 (0 = use global swing, >0 = override) */
+static uint8_t  dsqTrackSwing[DSQ_TRACKS];
+/* E4: Pending deferred triggers for per-track swing (odd steps) */
+struct PendingTrigger {
+    bool    active;
+    int8_t  engine;
+    uint8_t pad;
+    uint8_t velocity;
+    uint32_t delaySamples;
+};
+static PendingTrigger pendingTriggers[DSQ_TRACKS];
 
 /* Track → synth engine mapping  (-1 = sampler, 0=808, 1=909, 2=505, 3=303)
  * Updated via CMD_DSQ_SET_TRACK_ENGINE.  Default: all tracks use sampler. */
@@ -461,6 +483,8 @@ static void DsqInit() {
      * silenciando todos los live pads permanentemente. */
     memset(dsqSteps, 0, sizeof(dsqSteps));
     memset(&dseq, 0, sizeof(dseq));
+    memset(dsqTrackSwing, 0, sizeof(dsqTrackSwing));   /* E4 */
+    memset(pendingTriggers, 0, sizeof(pendingTriggers)); /* E4 */
     /* -1 (0xFF) = todos los tracks en modo sampler por defecto */
     memset(dsqTrackEngine, (uint8_t)0xFF, sizeof(dsqTrackEngine));
     dseq.tempo        = 120.0f;
@@ -552,6 +576,20 @@ struct BiquadEQ {
                 a2 = ((A+1.f)-(A-1.f)*c_+sq)*a0i;
                 break;
             }
+            case FTYPE_ALLPASS:
+                /* Audio EQ Cookbook — all-pass 2nd order */
+                a0i = 1.f/(1.f+a);
+                b0 = (1.f-a)*a0i; b1=(-2.f*c_)*a0i; b2=1.f;
+                a1 = b1; a2 = (1.f-a)*a0i;
+                break;
+            case FTYPE_RESONANT:
+                /* Resonant LP — same pole pair as LOWPASS; second BiquadEQ stage
+                 * is applied externally for 24 dB/oct + soft saturation.       */
+                a0i = 1.f/(1.f+a);
+                b0 = ((1.f-c_)*0.5f)*a0i;
+                b1 = (1.f-c_)*a0i;
+                b2 = b0; a1=(-2.f*c_)*a0i; a2=(1.f-a)*a0i;
+                break;
             default: b0=1;b1=b2=a1=a2=0; break;
         }
     }
@@ -611,6 +649,7 @@ static bool  limiterActive  = false;
  *  12. GLOBAL FILTER STATE
  * ═══════════════════════════════════════════════════════════════════ */
 static BiquadEQ  gFilterL, gFilterR;
+static BiquadEQ  gFilter2L, gFilter2R; /* 2nd stage para FTYPE_RESONANT global */
 static uint8_t gFilterType    = FTYPE_NONE;
 static float   gFilterCutoff  = 10000.0f;
 static float   gFilterQ       = 0.707f;
@@ -678,6 +717,7 @@ static bool  anySolo = false;
 
 /* Per-track filter */
 static BiquadEQ  trkFilter[MAX_PADS];
+static BiquadEQ  trkFilter2[MAX_PADS]; /* 2nd stage for FTYPE_RESONANT (24dB/oct) */
 static uint8_t trkFilterType[MAX_PADS];
 static float   trkFilterCut[MAX_PADS];
 static float   trkFilterQ[MAX_PADS];
@@ -1046,7 +1086,31 @@ static TR909::Kit synth909;
 static TR505::Kit synth505;
 static TB303::Synth acid303;
 static WavetableOsc wtOsc;
-static uint8_t trackWtNote[16];  /* nota MIDI por track WT, default C4=60 */
+static SH101::Synth synthSH101;  /* I1: Roland SH-101 */
+static FM2Op::Synth synthFM2Op;  /* I2: FM 2-op Yamaha */
+static uint8_t trackWtNote[16];   /* nota MIDI por track WT, default C4=60 */
+static uint8_t trackSH101Note[16]; /* nota MIDI por track SH101            */
+static uint8_t trackFM2OpNote[16]; /* nota MIDI por track FM2Op            */
+
+/* M3: DC Offset Removal — HP 1-polo a ~20 Hz en salida estereo */
+struct SimpleDcBlock {
+    float x1 = 0.0f, y1 = 0.0f;
+    float a  = 0.9997f; /* 1 - 2*pi*20 / 48000 */
+    void Init(float sr) { a = 1.0f - (6.283185f * 20.0f / sr); }
+    float Process(float x) {
+        float y = x - x1 + a * y1;
+        x1 = x; y1 = y;
+        return y;
+    }
+};
+static SimpleDcBlock dcBlockL, dcBlockR;  /* M3 */
+
+/* M1: Group saturation (kick bus / hat bus) */
+static float kickGroupDrive = 0.15f;   /* 0=off, 1=max */
+static float hatGroupDrive  = 0.08f;
+/* M2: Group bus compressor envelopes */
+static float kickGroupEnv   = 0.0f;
+static float hatGroupEnv    = 0.0f;
 
 /* ═══════════════════════════════════════════════════════════════════
  *  Tabla de remap: padIndex del ESP32 → TR808::InstrumentId
@@ -1126,7 +1190,7 @@ static inline void Synth808TriggerByPad(uint8_t padIdx, float velocity)
 }
 
 /* Bitmask: qué engines están activos (bit0=808, bit1=909, bit2=505, bit3=303, bit4=WTOSC) */
-static uint8_t synthActiveMask = 0x1F;  /* 808+909+505+303+WTOSC activos */
+static uint8_t synthActiveMask = 0x7F;  /* 808+909+505+303+WTOSC+SH101+FM2Op activos */
 
 /* ── Demo Mode ── */
 static Demo::DemoSequencer demoSeq;
@@ -1936,6 +2000,16 @@ static void DsqFireStep() {
                     wtOsc.NoteOn(note, vel);
                     break;
                 }
+                case SYNTH_ENGINE_SH101: {             /* I1 */
+                    uint8_t note = (t < 16) ? trackSH101Note[t] : 60;
+                    synthSH101.NoteOn(note, vel);
+                    break;
+                }
+                case SYNTH_ENGINE_FM2OP: {             /* I2 */
+                    uint8_t note = (t < 16) ? trackFM2OpNote[t] : 60;
+                    synthFM2Op.NoteOn(note, vel);
+                    break;
+                }
             }
         }
     }
@@ -1975,6 +2049,16 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
         return;
 
     float mixPeak = 0.0f;
+
+    /* ═ Pre-calcular: primer track que usa cada motor de síntesis (índice 0–4) ═ */
+    /* Solo cambia cuando el usuario reasigna engines — una vez por bloque es                  */
+    /* extremadamente barato (16 comparaciones de int8).                                       */
+    int8_t engTrk[7] = { -1, -1, -1, -1, -1, -1, -1 };
+    for(int _t = 0; _t < DSQ_TRACKS; _t++){
+        int8_t _e = dsqTrackEngine[_t];
+        if(_e >= 0 && _e < 7 && engTrk[_e] < 0)
+            engTrk[_e] = (int8_t)_t;
+    }
 
     for(size_t i = 0; i < size; i++){
         /* ── Drenar SPI FIFO cada 4 samples (~83µs) para evitar overflow
@@ -2144,9 +2228,15 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
                     float modCut = trkFilterCut[p] * (1.0f + 0.9f * lfoVal[p]);
                     modCut = clampF(modCut, 20.f, 20000.f);
                     trkFilter[p].SetType(trkFilterType[p], modCut, trkFilterQ[p], (float)SAMPLE_RATE);
+                    if(trkFilterType[p] == FTYPE_RESONANT)
+                        trkFilter2[p].SetType(FTYPE_RESONANT, modCut, trkFilterQ[p], (float)SAMPLE_RATE);
                     trkFilterLfoSet[p] = 1;
                 }
                 s = trkFilter[p].Process(s);
+                if(trkFilterType[p] == FTYPE_RESONANT){
+                    s = trkFilter2[p].Process(s);           /* 2nd pole pair → 24dB/oct */
+                    s = tanhf(s * 1.4f) * 0.714f;          /* soft saturation analógica */
+                }
             }
 
             /* ── Per-track dist + crush ── */
@@ -2250,26 +2340,117 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
         if (demoModeActive)
             demoFadeGain = demoSeq.ProcessSample();
 
-        /* ── SYNTH ENGINES (síntesis matemática) ── */
-        float synthMix = 0.0f;
-        if (synthActiveMask & (1 << SYNTH_ENGINE_808))
-            synthMix += synth808.Process();
-        if (synthActiveMask & (1 << SYNTH_ENGINE_909))
-            synthMix += synth909.Process();
-        if (kEnableSynth505 && (synthActiveMask & (1 << SYNTH_ENGINE_505)))
-            synthMix += synth505.Process();
-        if (synthActiveMask & (1 << SYNTH_ENGINE_303))
-            synthMix += acid303.Process();
-        if (synthActiveMask & (1 << SYNTH_ENGINE_WTOSC))
-            synthMix += wtOsc.Process();
+        /* ── SYNTH ENGINES — process + cadena FX per-track ── */
+        /* Lambda: aplica filtro/dist/EQ/echo/flanger/comp/vol/pan del track t  */
+        /* al sample s y lo suma a busL/busR. Si t<0 -> bus directo sin FX.     */
+        auto synthTobus = [&](float s, int8_t t){
+            if(t < 0 || t >= MAX_PADS){ busL += s; busR += s; return; }
+            /* filtro */
+            if(trkFilterType[t]){
+                s = trkFilter[t].Process(s);
+                if(trkFilterType[t] == FTYPE_RESONANT){
+                    s = trkFilter2[t].Process(s);
+                    s = tanhf(s * 1.4f) * 0.714f;
+                }
+            }
+            /* dist + bitcrush */
+            s = ApplyDist(s, trkDistDrive[t], trkDistMode[t]);
+            s = BitCrush(s, trkBitDepth[t]);
+            /* EQ 3 bandas */
+            if(trkEqLowDb[t])  s = trkEqLow[t].Process(s);
+            if(trkEqMidDb[t])  s = trkEqMid[t].Process(s);
+            if(trkEqHighDb[t]) s = trkEqHigh[t].Process(s);
+            /* echo */
+            if(trkEchoActive[t]){
+                uint32_t d = (uint32_t)trkEchoDelay[t];
+                if(d==0) d=1; if(d>=TRACK_ECHO_SIZE) d=TRACK_ECHO_SIZE-1;
+                uint32_t rpe = (trkEchoWp[t] + TRACK_ECHO_SIZE - d) % TRACK_ECHO_SIZE;
+                float delayed = trkEchoBuf[t][rpe];
+                trkEchoBuf[t][trkEchoWp[t]] = clampF(s + delayed*trkEchoFb[t], -1.f, 1.f);
+                s = s*(1.f - trkEchoMix[t]) + delayed*trkEchoMix[t];
+                trkEchoWp[t] = (trkEchoWp[t] + 1) % TRACK_ECHO_SIZE;
+            }
+            /* flanger */
+            if(trkFlgActive[t]){
+                trkFlgBuf[t][trkFlgWp[t]] = s;
+                float tri = trkFlgPhase[t] < 0.5f ? trkFlgPhase[t]*2.f : 2.f-trkFlgPhase[t]*2.f;
+                uint32_t tap = 2 + (uint32_t)(tri * trkFlgDepth[t] * (float)TRACK_FLANGER_SIZE * 0.25f);
+                if(tap >= TRACK_FLANGER_SIZE) tap = TRACK_FLANGER_SIZE-1;
+                uint32_t rpf = (trkFlgWp[t] + TRACK_FLANGER_SIZE - tap) % TRACK_FLANGER_SIZE;
+                float del = trkFlgBuf[t][rpf];
+                trkFlgBuf[t][trkFlgWp[t]] = clampF(s + del*trkFlgFb[t], -1.f, 1.f);
+                s = s*(1.f - trkFlgMix[t]) + del*trkFlgMix[t];
+                trkFlgWp[t] = (trkFlgWp[t] + 1) % TRACK_FLANGER_SIZE;
+                trkFlgPhase[t] += trkFlgRate[t] / (float)SAMPLE_RATE;
+                if(trkFlgPhase[t] >= 1.f) trkFlgPhase[t] -= 1.f;
+            }
+            /* compressor */
+            if(trkCompActive[t]){
+                float absS = fabsf(s);
+                if(absS > trkCompEnv[t]) trkCompEnv[t] += (absS - trkCompEnv[t]) * 0.25f;
+                else                     trkCompEnv[t] -= (trkCompEnv[t] - absS) * 0.03f;
+                if(trkCompEnv[t] > trkCompThresh[t] && trkCompEnv[t] > 0.001f){
+                    float g = trkCompThresh[t] / trkCompEnv[t];
+                    g = powf(g, 1.f - 1.f/trkCompRatio[t]);
+                    if(g < 0.125f) g = 0.125f;
+                    s *= g;
+                }
+            }
+            /* mute / solo */
+            bool muted = trackMute[t];
+            if(anySolo && !trackSolo[t]) muted = true;
+            if(muted) return;
+            /* LFO gain / pan */
+            float lfoGain = 1.0f;
+            if(trkLfoActive[t] && trkLfoTarget[t] == LFO_TGT_GAIN)
+                lfoGain = clampF(1.0f + 0.8f * lfoVal[t], 0.0f, 2.0f);
+            float panTrk = trackPanF[t];
+            if(trkLfoActive[t] && trkLfoTarget[t] == LFO_TGT_PAN)
+                panTrk = clampF(panTrk + 0.9f * lfoVal[t], -1.0f, 1.0f);
+            /* vol + pan -> bus */
+            float outS = s * trackGain[t] * lfoGain;
+            float pL = (1.f - panTrk) * 0.5f;
+            float pR = (1.f + panTrk) * 0.5f;
+            busL += outS * pL;
+            busR += outS * pR;
+            /* sends */
+            reverbBusL += outS * trackReverbSend[t];
+            delayBusL  += outS * trackDelaySend[t];
+            chorusBusL += outS * trackChorusSend[t];
+            /* peak */
+            float pk = fabsf(outS);
+            if(pk > trackPeak[t]) trackPeak[t] = pk;
+        };
 
-        /* Aplicar fade del demo mode */
-        if (demoModeActive)
-            synthMix *= demoFadeGain;
-
-        /* Añadir synths al bus (mono → ambos canales) */
-        busL += synthMix;
-        busR += synthMix;
+        /* demoFadeGain ya calculado arriba por el bloque DEMO MODE */
+        if (synthActiveMask & (1 << SYNTH_ENGINE_808)){
+            float s = synth808.Process() * demoFadeGain;
+            synthTobus(s, engTrk[SYNTH_ENGINE_808]);
+        }
+        if (synthActiveMask & (1 << SYNTH_ENGINE_909)){
+            float s = synth909.Process() * demoFadeGain;
+            synthTobus(s, engTrk[SYNTH_ENGINE_909]);
+        }
+        if (kEnableSynth505 && (synthActiveMask & (1 << SYNTH_ENGINE_505))){
+            float s = synth505.Process() * demoFadeGain;
+            synthTobus(s, engTrk[SYNTH_ENGINE_505]);
+        }
+        if (synthActiveMask & (1 << SYNTH_ENGINE_303)){
+            float s = acid303.Process() * demoFadeGain;
+            synthTobus(s, engTrk[SYNTH_ENGINE_303]);
+        }
+        if (synthActiveMask & (1 << SYNTH_ENGINE_WTOSC)){
+            float s = wtOsc.Process() * demoFadeGain;
+            synthTobus(s, engTrk[SYNTH_ENGINE_WTOSC]);
+        }
+        if (synthActiveMask & (1 << SYNTH_ENGINE_SH101)){  /* I1 */
+            float s = synthSH101.Process() * demoFadeGain;
+            synthTobus(s, engTrk[SYNTH_ENGINE_SH101]);
+        }
+        if (synthActiveMask & (1 << SYNTH_ENGINE_FM2OP)){  /* I2 */
+            float s = synthFM2Op.Process() * demoFadeGain;
+            synthTobus(s, engTrk[SYNTH_ENGINE_FM2OP]);
+        }
 
         /* ── Startup section cue (formante retro-robótico) ── */
         if(startupAnnounceActive)
@@ -2292,6 +2473,12 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
         if(gFilterType != FTYPE_NONE){
             L = gFilterL.Process(L);
             R = gFilterR.Process(R);
+            if(gFilterType == FTYPE_RESONANT){
+                L = gFilter2L.Process(L);
+                R = gFilter2R.Process(R);
+                L = tanhf(L * 1.4f) * 0.714f;
+                R = tanhf(R * 1.4f) * 0.714f;
+            }
         }
 
         /* ── Global bitcrush + distortion ── */
@@ -2388,6 +2575,10 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
             R = SoftClipKnee(R);
         }
 
+        /* M3: DC offset removal — HP 1-polo ~20 Hz */
+        L = dcBlockL.Process(L);
+        R = dcBlockR.Process(R);
+
         out[0][i] = L;
         out[1][i] = R;
 
@@ -2462,7 +2653,7 @@ static void ProcessCommand()
             uint8_t vel = p[1];
             if(kAcceptOneBasedPadIndex && pad > 0) pad -= 1;
             int8_t livEng = (pad < DSQ_TRACKS) ? dsqTrackEngine[pad] : -1;
-            if(livEng >= 0 && livEng <= 4){
+            if(livEng >= 0 && livEng <= 6){
                 /* Synth engine activo: disparar synth, NO sampler */
                 float fvel = clampF(vel / 127.0f, 0.0f, 1.0f);
                 switch(livEng){
@@ -2484,6 +2675,16 @@ static void ProcessCommand()
                     case SYNTH_ENGINE_WTOSC: {
                         uint8_t note = (pad < 16) ? trackWtNote[pad] : 60;
                         wtOsc.NoteOn(note, fvel);
+                        break;
+                    }
+                    case SYNTH_ENGINE_SH101: {           /* I1 */
+                        uint8_t note = (pad < 16) ? trackSH101Note[pad] : 60;
+                        synthSH101.NoteOn(note, fvel);
+                        break;
+                    }
+                    case SYNTH_ENGINE_FM2OP: {           /* I2 */
+                        uint8_t note = (pad < 16) ? trackFM2OpNote[pad] : 60;
+                        synthFM2Op.NoteOn(note, fvel);
                         break;
                     }
                 }
@@ -2582,9 +2783,13 @@ static void ProcessCommand()
             memcpy(&gFilterDist,    p + 12, 4);
             memcpy(&gFilterSrReduce,p + 16, 4);
             gFilterCutoff = clampF(gFilterCutoff, 20.f, 20000.f);
-            gFilterQ      = clampF(gFilterQ, 0.3f, 10.f);
+            gFilterQ      = (gFilterType == FTYPE_RESONANT) ? clampF(gFilterQ, 0.3f, 40.f) : clampF(gFilterQ, 0.3f, 28.f);
             gFilterL.SetType(gFilterType, gFilterCutoff, gFilterQ, (float)SAMPLE_RATE);
             gFilterR.SetType(gFilterType, gFilterCutoff, gFilterQ, (float)SAMPLE_RATE);
+            if(gFilterType == FTYPE_RESONANT){
+                gFilter2L.SetType(FTYPE_RESONANT, gFilterCutoff, gFilterQ, (float)SAMPLE_RATE);
+                gFilter2R.SetType(FTYPE_RESONANT, gFilterCutoff, gFilterQ, (float)SAMPLE_RATE);
+            }
         }
         break;
     case CMD_FILTER_CUTOFF:
@@ -2594,16 +2799,24 @@ static void ProcessCommand()
             if(gFilterType) {
                 gFilterL.SetType(gFilterType, gFilterCutoff, gFilterQ, (float)SAMPLE_RATE);
                 gFilterR.SetType(gFilterType, gFilterCutoff, gFilterQ, (float)SAMPLE_RATE);
+                if(gFilterType == FTYPE_RESONANT){
+                    gFilter2L.SetType(FTYPE_RESONANT, gFilterCutoff, gFilterQ, (float)SAMPLE_RATE);
+                    gFilter2R.SetType(FTYPE_RESONANT, gFilterCutoff, gFilterQ, (float)SAMPLE_RATE);
+                }
             }
         }
         break;
     case CMD_FILTER_RESONANCE:
         if(len >= 4){
             memcpy(&gFilterQ, p, 4);
-            gFilterQ = clampF(gFilterQ, 0.3f, 10.f);
+            gFilterQ = (gFilterType == FTYPE_RESONANT) ? clampF(gFilterQ, 0.3f, 40.f) : clampF(gFilterQ, 0.3f, 28.f);
             if(gFilterType) {
                 gFilterL.SetType(gFilterType, gFilterCutoff, gFilterQ, (float)SAMPLE_RATE);
                 gFilterR.SetType(gFilterType, gFilterCutoff, gFilterQ, (float)SAMPLE_RATE);
+                if(gFilterType == FTYPE_RESONANT){
+                    gFilter2L.SetType(FTYPE_RESONANT, gFilterCutoff, gFilterQ, (float)SAMPLE_RATE);
+                    gFilter2R.SetType(FTYPE_RESONANT, gFilterCutoff, gFilterQ, (float)SAMPLE_RATE);
+                }
             }
         }
         break;
@@ -2798,20 +3011,26 @@ static void ProcessCommand()
     case CMD_TRACK_FILTER:
         if(len >= 12){
             uint8_t t = p[0]; if(t >= MAX_PADS) break;
-            trkFilterType[t] = p[1];
+            uint8_t ftype = p[1];
+            trkFilterType[t] = ftype;
             float cut, res, gain = 0.f;
             memcpy(&cut, p + 4, 4);
             memcpy(&res, p + 8, 4);
             if(len >= 16) memcpy(&gain, p + 12, 4);
             trkFilterCut[t] = clampF(cut, 20.f, 20000.f);
-            trkFilterQ[t]   = clampF(res, 0.3f, 10.f);
-            trkFilter[t].SetType(p[1], trkFilterCut[t], trkFilterQ[t], (float)SAMPLE_RATE, gain);
+            /* RESONANT permite Q hasta 40 para auto-oscilación */
+            float qMax = (ftype == FTYPE_RESONANT) ? 40.f : 28.f;
+            trkFilterQ[t] = clampF(res, 0.3f, qMax);
+            trkFilter[t].SetType(ftype, trkFilterCut[t], trkFilterQ[t], (float)SAMPLE_RATE, gain);
+            if(ftype == FTYPE_RESONANT)
+                trkFilter2[t].SetType(FTYPE_RESONANT, trkFilterCut[t], trkFilterQ[t], (float)SAMPLE_RATE);
         }
         break;
     case CMD_TRACK_CLEAR_FILTER:
         if(len >= 1 && p[0] < MAX_PADS){
             trkFilterType[p[0]] = 0;
             trkFilter[p[0]].Reset();
+            trkFilter2[p[0]].Reset();
         }
         break;
     case CMD_TRACK_DISTORTION:
@@ -3584,8 +3803,12 @@ static void ProcessCommand()
         synth505.Init((float)SAMPLE_RATE);
         acid303.Init((float)SAMPLE_RATE);
         wtOsc.Init((float)SAMPLE_RATE);
-        for(int i=0;i<16;i++) trackWtNote[i] = (uint8_t)(60 + (i % 12)); /* C4..B4 cromático */
-        synthActiveMask = 0x1B;  /* 808+909+303+WTOSC (505 desactivado en reset) */
+        synthSH101.Init((float)SAMPLE_RATE);
+        synthFM2Op.Init((float)SAMPLE_RATE);
+        for(int i=0;i<16;i++) trackWtNote[i]    = (uint8_t)(60 + (i % 12));
+        for(int i=0;i<16;i++) trackSH101Note[i] = (uint8_t)(60 + (i % 12));
+        for(int i=0;i<16;i++) trackFM2OpNote[i] = (uint8_t)(60 + (i % 12));
+        synthActiveMask = 0x7B;  /* 808+909+303+WTOSC+SH101+FM2Op (505 desactivado) */
         break;
 
     /* ════════════════════════════════════════════
@@ -3638,6 +3861,16 @@ static void ProcessCommand()
                 case SYNTH_ENGINE_WTOSC: {
                     uint8_t note = (instrument < 16) ? trackWtNote[instrument] : 60;
                     wtOsc.NoteOn(note, velocity);
+                    break;
+                }
+                case SYNTH_ENGINE_SH101: {               /* I1 */
+                    uint8_t note = (instrument < 16) ? trackSH101Note[instrument] : 60;
+                    synthSH101.NoteOn(note, velocity);
+                    break;
+                }
+                case SYNTH_ENGINE_FM2OP: {               /* I2 */
+                    uint8_t note = (instrument < 16) ? trackFM2OpNote[instrument] : 60;
+                    synthFM2Op.NoteOn(note, velocity);
                     break;
                 }
             }
@@ -3736,11 +3969,11 @@ static void ProcessCommand()
                     break;
                 case SYNTH_ENGINE_WTOSC:
                     switch(paramId){
-                        case 0: wtOsc.SetWavePos(val);                           break; /* wave_pos 0-7      */
-                        case 1: wtOsc.SetAttack(val);                            break; /* attack ms         */
-                        case 2: wtOsc.SetDecay(val);                             break; /* decay ms          */
-                        case 3: wtOsc.volume = clampF(val, 0.f, 1.f);           break; /* volume            */
-                        case 4: { /* filter cutoff Hz (instrument byte = Q×10 si >=1) */
+                        case 0: wtOsc.SetWavePos(val);                           break;
+                        case 1: wtOsc.SetAttack(val);                            break;
+                        case 2: wtOsc.SetDecay(val);                             break;
+                        case 3: wtOsc.volume = clampF(val, 0.f, 1.f);           break;
+                        case 4: { /* filter cutoff Hz */
                             static float wtQ = 0.707f;
                             if(instrument >= 1) wtQ = clampF((float)instrument * 0.1f, 0.1f, 20.f);
                             wtOsc.SetFilter(val, wtQ);
@@ -3757,16 +3990,28 @@ static void ProcessCommand()
                             wtLfoD = val;
                             wtOsc.SetLfo(wtLfoR, wtLfoD, wtLfoT);
                             break; }
-                        case 7: { /* lfo target: 0=wave 1=pitch 2=vol */
+                        case 7: { /* lfo target */
                             static float wtLfoR=2.f, wtLfoD=0.f;
                             WtLfoTarget wtLfoT = (WtLfoTarget)clampF(val, 0.f, 2.f);
                             wtOsc.SetLfo(wtLfoR, wtLfoD, wtLfoT);
                             break; }
-                        case 8: /* nota MIDI del track (instrument=track index) */
+                        case 8:
                             if(instrument < 16)
                                 trackWtNote[instrument] = (uint8_t)clampF(val, 0.f, 127.f);
                             break;
                     }
+                    break;
+                case SYNTH_ENGINE_SH101:                  /* I1 */
+                    if(paramId == 20 && instrument < 16)  /* special: MIDI note assignment */
+                        trackSH101Note[instrument] = (uint8_t)clampF(val, 0.f, 127.f);
+                    else
+                        synthSH101.SetParam(paramId, val);
+                    break;
+                case SYNTH_ENGINE_FM2OP:                  /* I2 */
+                    if(paramId == 20 && instrument < 16)  /* special: MIDI note assignment */
+                        trackFM2OpNote[instrument] = (uint8_t)clampF(val, 0.f, 127.f);
+                    else
+                        synthFM2Op.SetParam(paramId, val);
                     break;
             }
         }
@@ -3973,6 +4218,20 @@ static void ProcessCommand()
         /* [track(1), engine(1)]  engine: 0xFF/-1=sampler, 0=808, 1=909, 2=505, 3=303 */
         if(len >= 2 && p[0] < DSQ_TRACKS)
             dsqTrackEngine[p[0]] = (int8_t)p[1]; /* 0xFF → -1 via cast */
+        break;
+
+    case CMD_DSQ_SET_TRACK_SWING:              /* E4 */
+        /* [track(1), swing 0-100(1)] override swing por track */
+        if(len >= 2 && p[0] < DSQ_TRACKS)
+            dsqTrackSwing[p[0]] = (p[1] > 100) ? 100 : p[1];
+        break;
+
+    case CMD_DSQ_SET_HUMANIZE:                 /* E2 */
+        /* [timingMs(1), velocityAmt(1)] 0=off */
+        if(len >= 2){
+            dseq.humanizeTimingMs = (p[0] > 20) ? 20 : p[0];
+            dseq.humanizeVelAmt   = (p[1] > 50) ? 50 : p[1];
+        }
         break;
 
     default: break;
@@ -4678,7 +4937,13 @@ static void InitFX()
     synth505.Init(sr);
     acid303.Init(sr);
     wtOsc.Init(sr);
-    for(int i=0; i<16; i++) trackWtNote[i] = (uint8_t)(60 + (i % 12)); /* C4..B4 */
+    synthSH101.Init(sr);  /* I1 */
+    synthFM2Op.Init(sr);  /* I2 */
+    dcBlockL.Init(sr);    /* M3 */
+    dcBlockR.Init(sr);
+    for(int i=0; i<16; i++) trackWtNote[i]    = (uint8_t)(60 + (i % 12));
+    for(int i=0; i<16; i++) trackSH101Note[i] = (uint8_t)(60 + (i % 12));
+    for(int i=0; i<16; i++) trackFM2OpNote[i] = (uint8_t)(60 + (i % 12));
     startupAnnounceOsc.Init(sr);
     startupAnnounceOsc.SetCarrierFreq(100.0f);
     startupAnnounceOsc.SetFormantFreq(900.0f);

@@ -213,7 +213,7 @@ build/main.o: main.cpp \
  libdaisy/Middlewares/Third_Party/FatFs/src/diskio.h \
  libdaisy/Middlewares/Third_Party/FatFs/src/ff.h synth/tr808.h \
  synth/tr909.h synth/tr505.h synth/tb303.h synth/wavetable_osc.h \
- synth/demo_mode.h
+ synth/sh101.h synth/fm2op.h synth/demo_mode.h
 libdaisy/Drivers/CMSIS-Device/ST/STM32H7xx/Include/stm32h7xx.h:
 libdaisy/Drivers/CMSIS-Device/ST/STM32H7xx/Include/stm32h750xx.h:
 libdaisy/Drivers/CMSIS_5/CMSIS/Core/Include/core_cm7.h:
@@ -500,4 +500,6 @@ synth/tr909.h:
 synth/tr505.h:
 synth/tb303.h:
 synth/wavetable_osc.h:
+synth/sh101.h:
+synth/fm2op.h:
 synth/demo_mode.h:

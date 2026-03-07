@@ -1,0 +1,231 @@
+arm-none-eabi-g++ -c -mcpu=cortex-m7 -mthumb -mfpu=fpv5-d16 -mfloat-abi=hard -DUSE_HAL_DRIVER -DSTM32H750xx -DHSE_VALUE=16000000  -DCORE_CM7 -DSTM32H750IB -DARM_MATH_CM7 -DUSE_FULL_LL_DRIVER -DFILEIO_ENABLE_FATFS_READER -DBOOT_APP -I. -I./DaisySP/DaisySP-LGPL/Source -include stm32h7xx.h -I./libdaisy -I./libdaisy/src/ -I./libdaisy/src/sys -I./libdaisy/src/usbd -I./libdaisy/src/usbh -I./libdaisy/Drivers/CMSIS_5/CMSIS/Core/Include/ -I./libdaisy/Drivers/CMSIS-DSP/Include -I./libdaisy/Drivers/CMSIS-Device/ST/STM32H7xx/Include -I./libdaisy/Drivers/STM32H7xx_HAL_Driver/Inc/ -I./libdaisy/Middlewares/ST/STM32_USB_Device_Library/Core/Inc -I./libdaisy/Middlewares/ST/STM32_USB_Host_Library/Core/Inc -I./libdaisy/Middlewares/ST/STM32_USB_Host_Library/Class/MSC/Inc -I./libdaisy/Middlewares/ST/STM32_USB_Host_Library/Class/MIDI/Inc -I./libdaisy/core/ -I./DaisySP/Source -I./libdaisy/Middlewares/Third_Party/FatFs/src -O2 -Wall -Wno-missing-attributes -fasm -fdata-sections -ffunction-sections -Wno-stringop-overflow -g -ggdb -MMD -MP -MF"build/main.d" -fno-exceptions -fasm -finline -finline-functions-called-once -fshort-enums -fno-move-loop-invariants -fno-unwind-tables -fno-rtti -Wno-register -std=gnu++14 -Wa,-a,-ad,-alms=build/main.lst main.cpp -o build/main.o
+In file included from main.cpp:34:
+synth/tr808.h: In member function 'uint8_t TR808::Kit::ActiveCount() const':
+synth/tr808.h:1118:9: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+ 1118 |         if (kick.IsActive())     c++; if (snare.IsActive())    c++;
+      |         ^~
+synth/tr808.h:1118:39: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+ 1118 |         if (kick.IsActive())     c++; if (snare.IsActive())    c++;
+      |                                       ^~
+synth/tr808.h:1119:9: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+ 1119 |         if (clap.IsActive())     c++; if (hihatC.IsActive())   c++;
+      |         ^~
+synth/tr808.h:1119:39: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+ 1119 |         if (clap.IsActive())     c++; if (hihatC.IsActive())   c++;
+      |                                       ^~
+synth/tr808.h:1120:9: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+ 1120 |         if (hihatO.IsActive())   c++; if (lowTom.IsActive())   c++;
+      |         ^~
+synth/tr808.h:1120:39: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+ 1120 |         if (hihatO.IsActive())   c++; if (lowTom.IsActive())   c++;
+      |                                       ^~
+synth/tr808.h:1121:9: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+ 1121 |         if (midTom.IsActive())   c++; if (hiTom.IsActive())    c++;
+      |         ^~
+synth/tr808.h:1121:39: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+ 1121 |         if (midTom.IsActive())   c++; if (hiTom.IsActive())    c++;
+      |                                       ^~
+synth/tr808.h:1122:9: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+ 1122 |         if (lowConga.IsActive()) c++; if (midConga.IsActive()) c++;
+      |         ^~
+synth/tr808.h:1122:39: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+ 1122 |         if (lowConga.IsActive()) c++; if (midConga.IsActive()) c++;
+      |                                       ^~
+synth/tr808.h:1123:9: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+ 1123 |         if (hiConga.IsActive())  c++; if (claves.IsActive())   c++;
+      |         ^~
+synth/tr808.h:1123:39: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+ 1123 |         if (hiConga.IsActive())  c++; if (claves.IsActive())   c++;
+      |                                       ^~
+synth/tr808.h:1124:9: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+ 1124 |         if (maracas.IsActive())  c++; if (rimshot.IsActive())  c++;
+      |         ^~
+synth/tr808.h:1124:39: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+ 1124 |         if (maracas.IsActive())  c++; if (rimshot.IsActive())  c++;
+      |                                       ^~
+synth/tr808.h:1125:9: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+ 1125 |         if (cowbell.IsActive())  c++; if (cymbal.IsActive())   c++;
+      |         ^~
+synth/tr808.h:1125:39: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+ 1125 |         if (cowbell.IsActive())  c++; if (cymbal.IsActive())   c++;
+      |                                       ^~
+In file included from main.cpp:35:
+synth/tr909.h: In member function 'uint8_t TR909::Kit::ActiveCount() const':
+synth/tr909.h:946:9: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+  946 |         if (kick.IsActive())    c++; if (snare.IsActive())   c++;
+      |         ^~
+synth/tr909.h:946:38: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+  946 |         if (kick.IsActive())    c++; if (snare.IsActive())   c++;
+      |                                      ^~
+synth/tr909.h:947:9: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+  947 |         if (clap.IsActive())    c++; if (hihatC.IsActive())  c++;
+      |         ^~
+synth/tr909.h:947:38: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+  947 |         if (clap.IsActive())    c++; if (hihatC.IsActive())  c++;
+      |                                      ^~
+synth/tr909.h:948:9: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+  948 |         if (hihatO.IsActive())  c++; if (lowTom.IsActive())  c++;
+      |         ^~
+synth/tr909.h:948:38: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+  948 |         if (hihatO.IsActive())  c++; if (lowTom.IsActive())  c++;
+      |                                      ^~
+synth/tr909.h:949:9: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+  949 |         if (midTom.IsActive())  c++; if (hiTom.IsActive())   c++;
+      |         ^~
+synth/tr909.h:949:38: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+  949 |         if (midTom.IsActive())  c++; if (hiTom.IsActive())   c++;
+      |                                      ^~
+synth/tr909.h:950:9: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+  950 |         if (ride.IsActive())    c++; if (crash.IsActive())   c++;
+      |         ^~
+synth/tr909.h:950:38: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+  950 |         if (ride.IsActive())    c++; if (crash.IsActive())   c++;
+      |                                      ^~
+In file included from main.cpp:36:
+synth/tr505.h: In member function 'uint8_t TR505::Kit::ActiveCount() const':
+synth/tr505.h:1055:9: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+ 1055 |         if (kick.IsActive())    c++; if (snare.IsActive())   c++;
+      |         ^~
+synth/tr505.h:1055:38: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+ 1055 |         if (kick.IsActive())    c++; if (snare.IsActive())   c++;
+      |                                      ^~
+synth/tr505.h:1056:9: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+ 1056 |         if (clap.IsActive())    c++; if (hihatC.IsActive())  c++;
+      |         ^~
+synth/tr505.h:1056:38: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+ 1056 |         if (clap.IsActive())    c++; if (hihatC.IsActive())  c++;
+      |                                      ^~
+synth/tr505.h:1057:9: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+ 1057 |         if (hihatO.IsActive())  c++; if (lowTom.IsActive())  c++;
+      |         ^~
+synth/tr505.h:1057:38: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+ 1057 |         if (hihatO.IsActive())  c++; if (lowTom.IsActive())  c++;
+      |                                      ^~
+synth/tr505.h:1058:9: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+ 1058 |         if (midTom.IsActive())  c++; if (hiTom.IsActive())   c++;
+      |         ^~
+synth/tr505.h:1058:38: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+ 1058 |         if (midTom.IsActive())  c++; if (hiTom.IsActive())   c++;
+      |                                      ^~
+synth/tr505.h:1059:9: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+ 1059 |         if (cowbell.IsActive()) c++; if (cymbal.IsActive())  c++;
+      |         ^~
+synth/tr505.h:1059:38: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+ 1059 |         if (cowbell.IsActive()) c++; if (cymbal.IsActive())  c++;
+      |                                      ^~
+In file included from main.cpp:39:
+synth/sh101.h: In member function 'void SH101::LadderFilter::SetParams(float, float)':
+synth/sh101.h:207:15: warning: unused variable 'norm' [-Wunused-variable]
+  207 |         float norm = 1.0f / (1.0f + 1.8730f*w + 0.4955f*w2 - 0.0863f*w3 + 0.0049f*w4);
+      |               ^~~~
+main.cpp: In function 'void AudioCallback(daisy::AudioHandle::InputBuffer, daisy::AudioHandle::OutputBuffer, size_t)':
+main.cpp:2254:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+ 2254 |                 if(d==0) d=1; if(d>=TRACK_ECHO_SIZE) d=TRACK_ECHO_SIZE-1;
+      |                 ^~
+main.cpp:2254:31: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+ 2254 |                 if(d==0) d=1; if(d>=TRACK_ECHO_SIZE) d=TRACK_ECHO_SIZE-1;
+      |                               ^~
+main.cpp: In lambda function:
+main.cpp:2366:17: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+ 2366 |                 if(d==0) d=1; if(d>=TRACK_ECHO_SIZE) d=TRACK_ECHO_SIZE-1;
+      |                 ^~
+main.cpp:2366:31: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+ 2366 |                 if(d==0) d=1; if(d>=TRACK_ECHO_SIZE) d=TRACK_ECHO_SIZE-1;
+      |                               ^~
+main.cpp: In function 'void ProcessCommand()':
+main.cpp:4091:33: warning: variable 'tmpHdr' set but not used [-Wunused-but-set-variable]
+ 4091 |                 SPIPacketHeader tmpHdr;
+      |                                 ^~~~~~
+main.cpp:4188:30: warning: narrowing conversion of '(dseq.DaisySeqState::playing ? 1 : 0)' from 'unsigned int' to 'uint8_t' {aka 'unsigned char'} [-Wnarrowing]
+ 4188 |                 dseq.playing ? 1u : 0u,
+      |                 ~~~~~~~~~~~~~^~~~~~~~~
+main.cpp: In function 'int main()':
+main.cpp:5093:10: warning: unused variable 'sdOk' [-Wunused-variable]
+ 5093 |     bool sdOk = false;
+      |          ^~~~
+main.cpp: At global scope:
+main.cpp:4687:13: warning: 'void AutoLoadFromSD()' defined but not used [-Wunused-function]
+ 4687 | static void AutoLoadFromSD()
+      |             ^~~~~~~~~~~~~~
+main.cpp:4465:13: warning: 'bool InitSD()' defined but not used [-Wunused-function]
+ 4465 | static bool InitSD()
+      |             ^~~~~~
+main.cpp:4252:17: warning: 'rxReadPtr' defined but not used [-Wunused-variable]
+ 4252 | static uint16_t rxReadPtr = 0;
+      |                 ^~~~~~~~~
+main.cpp:1113:14: warning: 'hatGroupEnv' defined but not used [-Wunused-variable]
+ 1113 | static float hatGroupEnv    = 0.0f;
+      |              ^~~~~~~~~~~
+main.cpp:1112:14: warning: 'kickGroupEnv' defined but not used [-Wunused-variable]
+ 1112 | static float kickGroupEnv   = 0.0f;
+      |              ^~~~~~~~~~~~
+main.cpp:1110:14: warning: 'hatGroupDrive' defined but not used [-Wunused-variable]
+ 1110 | static float hatGroupDrive  = 0.08f;
+      |              ^~~~~~~~~~~~~
+main.cpp:1109:14: warning: 'kickGroupDrive' defined but not used [-Wunused-variable]
+ 1109 | static float kickGroupDrive = 0.15f;   /* 0=off, 1=max */
+      |              ^~~~~~~~~~~~~~
+main.cpp:56:27: warning: 'hdma_spi1_tx' defined but not used [-Wunused-variable]
+   56 | static DMA_HandleTypeDef  hdma_spi1_tx;
+      |                           ^~~~~~~~~~~~
+main.cpp:55:27: warning: 'hdma_spi1_rx' defined but not used [-Wunused-variable]
+   55 | static DMA_HandleTypeDef  hdma_spi1_rx;
+      |                           ^~~~~~~~~~~~
+main.cpp: In function 'void ProcessCommand()':
+main.cpp:3720:16: warning: 'char* strncpy(char*, const char*, size_t)' output may be truncated copying 31 bytes from a string of length 31 [-Wstringop-truncation]
+ 3720 |         strncpy((char*)(resp + 14), currentKitName, 31);
+      |         ~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+main.cpp:3546:16: warning: 'char* strncpy(char*, const char*, size_t)' output may be truncated copying 31 bytes from a string of length 31 [-Wstringop-truncation]
+ 3546 |         strncpy(resp.currentKit, currentKitName, 31);
+      |         ~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+main.cpp:3512:60: warning: '%s' directive output may be truncated writing up to 255 bytes into a region of size between 64 and 159 [-Wformat-truncation=]
+ 3512 |                         snprintf(fpath, sizeof(fpath), "%s/%s", path, fno.fname);
+      |                                                            ^~         ~~~~~~~~~
+main.cpp:3512:33: note: 'snprintf' output between 2 and 352 bytes into a destination of size 160
+ 3512 |                         snprintf(fpath, sizeof(fpath), "%s/%s", path, fno.fname);
+      |                         ~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+main.cpp:3502:60: warning: '%s' directive output may be truncated writing up to 255 bytes into a region of size between 64 and 159 [-Wformat-truncation=]
+ 3502 |                         snprintf(fpath, sizeof(fpath), "%s/%s", path, fno.fname);
+      |                                                            ^~         ~~~~~~~~~
+main.cpp:3502:33: note: 'snprintf' output between 2 and 352 bytes into a destination of size 160
+ 3502 |                         snprintf(fpath, sizeof(fpath), "%s/%s", path, fno.fname);
+      |                         ~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+main.cpp:3523:24: warning: 'char* strncpy(char*, const char*, size_t)' output may be truncated copying 31 bytes from a string of length 31 [-Wstringop-truncation]
+ 3523 |                 strncpy(currentKitName, lk.kitName, 31);
+      |                 ~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+main.cpp:3577:28: warning: 'char* strncpy(char*, const char*, size_t)' output may be truncated copying 31 bytes from a string of length 255 [-Wstringop-truncation]
+ 3577 |                     strncpy(resp.kits[resp.count], fno.fname, 31);
+      |                     ~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+arm-none-eabi-g++ build/startup_stm32h750xx.o build/main.o  -mcpu=cortex-m7 -mthumb -mfpu=fpv5-d16 -mfloat-abi=hard --specs=nano.specs --specs=nosys.specs -T./libdaisy/core/STM32H750IB_sram.lds -L./DaisySP/DaisySP-LGPL/build -L./libdaisy/build -L ./DaisySP/build -ldaisysp-lgpl -ldaisy -lc -lm -lnosys -ldaisysp -Wl,-Map=build/DrumMachine.map,--cref -Wl,--gc-sections -Wl,--print-memory-usage -o build/DrumMachine.elf
+C:/ST/STM32CubeIDE_2.0.0/STM32CubeIDE/plugins/com.st.stm32cube.ide.mcu.externaltools.gnu-tools-for-stm32.13.3.rel1.win32_1.0.100.202509120712/tools/bin/../lib/gcc/arm-none-eabi/13.3.1/../../../../arm-none-eabi/bin/ld.exe: C:/ST/STM32CubeIDE_2.0.0/STM32CubeIDE/plugins/com.st.stm32cube.ide.mcu.externaltools.gnu-tools-for-stm32.13.3.rel1.win32_1.0.100.202509120712/tools/bin/../lib/gcc/arm-none-eabi/13.3.1/../../../../arm-none-eabi/lib/thumb/v7e-m+dp/hard\libc_nano.a(libc_a-closer.o): in function `_close_r':
+(.text._close_r+0xc): warning: _close is not implemented and will always fail
+C:/ST/STM32CubeIDE_2.0.0/STM32CubeIDE/plugins/com.st.stm32cube.ide.mcu.externaltools.gnu-tools-for-stm32.13.3.rel1.win32_1.0.100.202509120712/tools/bin/../lib/gcc/arm-none-eabi/13.3.1/../../../../arm-none-eabi/bin/ld.exe: C:/ST/STM32CubeIDE_2.0.0/STM32CubeIDE/plugins/com.st.stm32cube.ide.mcu.externaltools.gnu-tools-for-stm32.13.3.rel1.win32_1.0.100.202509120712/tools/bin/../lib/gcc/arm-none-eabi/13.3.1/../../../../arm-none-eabi/lib/thumb/v7e-m+dp/hard\libc_nano.a(libc_a-closer.o): note: the message above does not take linker garbage collection into account
+C:/ST/STM32CubeIDE_2.0.0/STM32CubeIDE/plugins/com.st.stm32cube.ide.mcu.externaltools.gnu-tools-for-stm32.13.3.rel1.win32_1.0.100.202509120712/tools/bin/../lib/gcc/arm-none-eabi/13.3.1/../../../../arm-none-eabi/bin/ld.exe: C:/ST/STM32CubeIDE_2.0.0/STM32CubeIDE/plugins/com.st.stm32cube.ide.mcu.externaltools.gnu-tools-for-stm32.13.3.rel1.win32_1.0.100.202509120712/tools/bin/../lib/gcc/arm-none-eabi/13.3.1/../../../../arm-none-eabi/lib/thumb/v7e-m+dp/hard\libc_nano.a(libc_a-fstatr.o): in function `_fstat_r':
+(.text._fstat_r+0xe): warning: _fstat is not implemented and will always fail
+C:/ST/STM32CubeIDE_2.0.0/STM32CubeIDE/plugins/com.st.stm32cube.ide.mcu.externaltools.gnu-tools-for-stm32.13.3.rel1.win32_1.0.100.202509120712/tools/bin/../lib/gcc/arm-none-eabi/13.3.1/../../../../arm-none-eabi/bin/ld.exe: C:/ST/STM32CubeIDE_2.0.0/STM32CubeIDE/plugins/com.st.stm32cube.ide.mcu.externaltools.gnu-tools-for-stm32.13.3.rel1.win32_1.0.100.202509120712/tools/bin/../lib/gcc/arm-none-eabi/13.3.1/../../../../arm-none-eabi/lib/thumb/v7e-m+dp/hard\libc_nano.a(libc_a-isattyr.o): in function `_isatty_r':
+(.text._isatty_r+0xc): warning: _isatty is not implemented and will always fail
+C:/ST/STM32CubeIDE_2.0.0/STM32CubeIDE/plugins/com.st.stm32cube.ide.mcu.externaltools.gnu-tools-for-stm32.13.3.rel1.win32_1.0.100.202509120712/tools/bin/../lib/gcc/arm-none-eabi/13.3.1/../../../../arm-none-eabi/bin/ld.exe: C:/ST/STM32CubeIDE_2.0.0/STM32CubeIDE/plugins/com.st.stm32cube.ide.mcu.externaltools.gnu-tools-for-stm32.13.3.rel1.win32_1.0.100.202509120712/tools/bin/../lib/gcc/arm-none-eabi/13.3.1/../../../../arm-none-eabi/lib/thumb/v7e-m+dp/hard\libc_nano.a(libc_a-fstatr.o): note: the message above does not take linker garbage collection into account
+C:/ST/STM32CubeIDE_2.0.0/STM32CubeIDE/plugins/com.st.stm32cube.ide.mcu.externaltools.gnu-tools-for-stm32.13.3.rel1.win32_1.0.100.202509120712/tools/bin/../lib/gcc/arm-none-eabi/13.3.1/../../../../arm-none-eabi/bin/ld.exe: C:/ST/STM32CubeIDE_2.0.0/STM32CubeIDE/plugins/com.st.stm32cube.ide.mcu.externaltools.gnu-tools-for-stm32.13.3.rel1.win32_1.0.100.202509120712/tools/bin/../lib/gcc/arm-none-eabi/13.3.1/../../../../arm-none-eabi/lib/thumb/v7e-m+dp/hard\libc_nano.a(libc_a-isattyr.o): note: the message above does not take linker garbage collection into account
+C:/ST/STM32CubeIDE_2.0.0/STM32CubeIDE/plugins/com.st.stm32cube.ide.mcu.externaltools.gnu-tools-for-stm32.13.3.rel1.win32_1.0.100.202509120712/tools/bin/../lib/gcc/arm-none-eabi/13.3.1/../../../../arm-none-eabi/bin/ld.exe: C:/ST/STM32CubeIDE_2.0.0/STM32CubeIDE/plugins/com.st.stm32cube.ide.mcu.externaltools.gnu-tools-for-stm32.13.3.rel1.win32_1.0.100.202509120712/tools/bin/../lib/gcc/arm-none-eabi/13.3.1/../../../../arm-none-eabi/lib/thumb/v7e-m+dp/hard\libc_nano.a(libc_a-lseekr.o): in function `_lseek_r':
+(.text._lseek_r+0x10): warning: _lseek is not implemented and will always fail
+C:/ST/STM32CubeIDE_2.0.0/STM32CubeIDE/plugins/com.st.stm32cube.ide.mcu.externaltools.gnu-tools-for-stm32.13.3.rel1.win32_1.0.100.202509120712/tools/bin/../lib/gcc/arm-none-eabi/13.3.1/../../../../arm-none-eabi/bin/ld.exe: C:/ST/STM32CubeIDE_2.0.0/STM32CubeIDE/plugins/com.st.stm32cube.ide.mcu.externaltools.gnu-tools-for-stm32.13.3.rel1.win32_1.0.100.202509120712/tools/bin/../lib/gcc/arm-none-eabi/13.3.1/../../../../arm-none-eabi/lib/thumb/v7e-m+dp/hard\libc_nano.a(libc_a-lseekr.o): note: the message above does not take linker garbage collection into account
+C:/ST/STM32CubeIDE_2.0.0/STM32CubeIDE/plugins/com.st.stm32cube.ide.mcu.externaltools.gnu-tools-for-stm32.13.3.rel1.win32_1.0.100.202509120712/tools/bin/../lib/gcc/arm-none-eabi/13.3.1/../../../../arm-none-eabi/bin/ld.exe: C:/ST/STM32CubeIDE_2.0.0/STM32CubeIDE/plugins/com.st.stm32cube.ide.mcu.externaltools.gnu-tools-for-stm32.13.3.rel1.win32_1.0.100.202509120712/tools/bin/../lib/gcc/arm-none-eabi/13.3.1/../../../../arm-none-eabi/lib/thumb/v7e-m+dp/hard\libc_nano.a(libc_a-readr.o): in function `_read_r':
+(.text._read_r+0x10): warning: _read is not implemented and will always fail
+C:/ST/STM32CubeIDE_2.0.0/STM32CubeIDE/plugins/com.st.stm32cube.ide.mcu.externaltools.gnu-tools-for-stm32.13.3.rel1.win32_1.0.100.202509120712/tools/bin/../lib/gcc/arm-none-eabi/13.3.1/../../../../arm-none-eabi/bin/ld.exe: C:/ST/STM32CubeIDE_2.0.0/STM32CubeIDE/plugins/com.st.stm32cube.ide.mcu.externaltools.gnu-tools-for-stm32.13.3.rel1.win32_1.0.100.202509120712/tools/bin/../lib/gcc/arm-none-eabi/13.3.1/../../../../arm-none-eabi/lib/thumb/v7e-m+dp/hard\libc_nano.a(libc_a-readr.o): note: the message above does not take linker garbage collection into account
+C:/ST/STM32CubeIDE_2.0.0/STM32CubeIDE/plugins/com.st.stm32cube.ide.mcu.externaltools.gnu-tools-for-stm32.13.3.rel1.win32_1.0.100.202509120712/tools/bin/../lib/gcc/arm-none-eabi/13.3.1/../../../../arm-none-eabi/bin/ld.exe: C:/ST/STM32CubeIDE_2.0.0/STM32CubeIDE/plugins/com.st.stm32cube.ide.mcu.externaltools.gnu-tools-for-stm32.13.3.rel1.win32_1.0.100.202509120712/tools/bin/../lib/gcc/arm-none-eabi/13.3.1/../../../../arm-none-eabi/lib/thumb/v7e-m+dp/hard\libc_nano.a(libc_a-writer.o): in function `_write_r':
+(.text._write_r+0x10): warning: _write is not implemented and will always fail
+C:/ST/STM32CubeIDE_2.0.0/STM32CubeIDE/plugins/com.st.stm32cube.ide.mcu.externaltools.gnu-tools-for-stm32.13.3.rel1.win32_1.0.100.202509120712/tools/bin/../lib/gcc/arm-none-eabi/13.3.1/../../../../arm-none-eabi/bin/ld.exe: warning: build/DrumMachine.elf has a LOAD segment with RWX permissions
+C:/ST/STM32CubeIDE_2.0.0/STM32CubeIDE/plugins/com.st.stm32cube.ide.mcu.externaltools.gnu-tools-for-stm32.13.3.rel1.win32_1.0.100.202509120712/tools/bin/../lib/gcc/arm-none-eabi/13.3.1/../../../../arm-none-eabi/bin/ld.exe: C:/ST/STM32CubeIDE_2.0.0/STM32CubeIDE/plugins/com.st.stm32cube.ide.mcu.externaltools.gnu-tools-for-stm32.13.3.rel1.win32_1.0.100.202509120712/tools/bin/../lib/gcc/arm-none-eabi/13.3.1/../../../../arm-none-eabi/lib/thumb/v7e-m+dp/hard\libc_nano.a(libc_a-writer.o): note: the message above does not take linker garbage collection into account
+Memory region         Used Size  Region Size  %age Used
+           FLASH:           0 B       128 KB      0.00%
+         DTCMRAM:       78548 B       128 KB     59.93%
+            SRAM:      212872 B       480 KB     43.31%
+      RAM_D2_DMA:       18676 B        32 KB     56.99%
+          RAM_D2:           0 B       256 KB      0.00%
+          RAM_D3:           0 B        64 KB      0.00%
+     BACKUP_SRAM:          12 B         4 KB      0.29%
+         ITCMRAM:           0 B        64 KB      0.00%
+           SDRAM:     6733876 B        64 MB     10.03%
+       QSPIFLASH:           0 B      7936 KB      0.00%
+arm-none-eabi-objcopy -O ihex build/DrumMachine.elf build/DrumMachine.hex
+arm-none-eabi-objcopy -O binary -S build/DrumMachine.elf build/DrumMachine.bin
