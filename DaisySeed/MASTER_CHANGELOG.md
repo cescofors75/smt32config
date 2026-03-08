@@ -299,13 +299,13 @@ Solo devuelve carpetas que son **kits completos** (ej. `RED 808 KARZ`).
 **Fecha:** 26 febrero 2026  
 **Firmware:** DaisySeed/main.cpp  
 **Archivos nuevos:** `synth/tr808.h`, `synth/tr909.h`, `synth/tr505.h`, `synth/tb303.h`, `synth/demo_mode.h`  
-**Afecta a:** Protocolo RED808 — Nuevos comandos 0xC0–0xC5, comportamiento al boot
+**Afecta a:** Protocolo RED808 — Nuevos comandos 0xC0–0xC6, comportamiento al boot
 
 ---
 
 ## 1. RESUMEN EJECUTIVO
 
-Se han añadido **4 motores de síntesis matemática** al firmware Slave:
+Se han añadido **7 motores de síntesis matemática** al firmware Slave:
 
 | Motor | Descripción | Instrumentos |
 |-------|-------------|-------------|
@@ -313,6 +313,9 @@ Se han añadido **4 motores de síntesis matemática** al firmware Slave:
 | **TR-909** | Roland TR-909 (más agresiva) | 11: Kick, Snare, Clap, HiHat C/O, 3 Toms, Ride, Crash, RimShot |
 | **TR-505** | Roland TR-505 lo-fi digital | 11: Kick, Snare, Clap, HiHat C/O, 3 Toms, Cowbell, Cymbal, RimShot |
 | **TB-303** | Bass synth acid (monofónico) | Oscilador SAW/SQUARE + filtro ladder 24dB/oct + accent + slide |
+| **WTOSC** | Wavetable polysynth | 8 ondas con morph, AD por voz, LPF y LFO interno |
+| **SH-101** | Mono lead/bass | Osc principal + sub, filtro ladder, doble envolvente y LFO |
+| **FM2Op** | FM 2 operadores | Algoritmos FM/aditivo/ring con envelopes separados |
 
 Todo se genera **en tiempo real por CPU** — no usa samples ni SDRAM. El audio de los synths se mezcla directamente al bus master **después** del sidechain y **antes** de la cadena master FX.
 
@@ -320,7 +323,7 @@ Además, se ha añadido un **DEMO MODE** que se reproduce automáticamente al ar
 
 ---
 
-## 2. NUEVOS COMANDOS SPI (0xC0–0xC5)
+## 2. NUEVOS COMANDOS SPI (0xC0–0xC6)
 
 ### 2.1 `CMD_SYNTH_TRIGGER` (0xC0)
 
@@ -510,8 +513,11 @@ Activa/desactiva motores de síntesis individualmente.
 | 1 | TR-909 | `mask \| 0x02` | `mask & ~0x02` |
 | 2 | TR-505 | `mask \| 0x04` | `mask & ~0x04` |
 | 3 | TB-303 | `mask \| 0x08` | `mask & ~0x08` |
+| 4 | WTOSC | `mask \| 0x10` | `mask & ~0x10` |
+| 5 | SH-101 | `mask \| 0x20` | `mask & ~0x20` |
+| 6 | FM2Op | `mask \| 0x40` | `mask & ~0x40` |
 
-**Valor por defecto: `0x0F`** (todos activos)
+**Valor por defecto: `0x7B`** (808+909+303+WTOSC+SH101+FM2Op; 505 desactivado)
 
 **Ejemplos:**
 ```c
@@ -524,8 +530,44 @@ uint8_t off = 0x00;
 sendCommand(CMD_SYNTH_ACTIVE, &off, 1);
 
 // Todos encendidos (default)
-uint8_t all = 0x0F;
+uint8_t all = 0x7F;
 sendCommand(CMD_SYNTH_ACTIVE, &all, 1);
+```
+
+---
+
+### 2.7 `CMD_SYNTH_PRESET` (0xC6)
+
+Aplica uno de los **4 presets de fábrica** de un motor de síntesis.
+
+| Byte | Campo | Tipo | Descripción |
+|------|-------|------|-------------|
+| 0 | engine | uint8 | 0=808, 1=909, 2=505, 3=303, 4=WTOSC, 5=SH-101, 6=FM2Op |
+| 1 | preset | uint8 | 0–3 |
+
+**Payload total: 2 bytes**
+
+#### Bancos disponibles
+
+| Engine | Preset 0 | Preset 1 | Preset 2 | Preset 3 |
+|--------|----------|----------|----------|----------|
+| 808 | Classic808 | HipHop | Techno | Latin |
+| 909 | Classic909 | Techno | HousePound | Industrial |
+| 505 | Classic505 | NewWave | Electro | LoFiHipHop |
+| 303 | Classic Acid | Resonant Squelch | Sub Bass | Soft Lead |
+| WTOSC | Classic Pad | Glass Pluck | Organ Motion | PWM Bass |
+| SH-101 | Bass Punch | Acid Lead | PWM Keys | Drone Pad |
+| FM2Op | FM Bass | EPiano | Bell | Growl Lead |
+
+**Ejemplos:**
+```c
+// Cargar preset Techno del 909
+uint8_t techno909[] = { 0x01, 0x01 };
+sendCommand(CMD_SYNTH_PRESET, techno909, 2);
+
+// Cargar preset Bell del FM2Op
+uint8_t bellFm[] = { 0x06, 0x02 };
+sendCommand(CMD_SYNTH_PRESET, bellFm, 2);
 ```
 
 ---

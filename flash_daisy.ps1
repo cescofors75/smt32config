@@ -11,6 +11,28 @@ $log    = 'C:\Users\cesco\Documents\smt32config\flash_daisy_script_log.txt'
 $env:PATH = "$gccBin;$makeBin;$env:PATH"
 Set-Location $root
 
+function Invoke-PythonScript {
+    param(
+        [string]$ScriptPath
+    )
+
+    $launchers = @(
+        @('py', '-3', $ScriptPath),
+        @('python', $ScriptPath)
+    )
+
+    foreach($launcher in $launchers) {
+        $cmd = $launcher[0]
+        if(Get-Command $cmd -ErrorAction SilentlyContinue) {
+            & $cmd $launcher[1..($launcher.Length - 1)]
+            return $LASTEXITCODE
+        }
+    }
+
+    Write-Host 'No se encontro py/python para generar samples.bin' -ForegroundColor Yellow
+    return 9009
+}
+
 "=== FLASH DAISY $(Get-Date -Format s) ===" | Out-File -FilePath $log -Encoding utf8
 Write-Host 'PASO 1/2: Presiona BOOT + RESET en la Daisy (ROM DFU)...' -ForegroundColor Yellow
 
@@ -60,7 +82,26 @@ if(-not $found2) {
 }
 
 Write-Host 'Flasheando firmware app (QSPI @ 0x90040000)...' -ForegroundColor Cyan
-$resApp = & $dfu -a 0 -s 0x90040000 -D $fw -d ",0483:df11" 2>&1 | Tee-Object -FilePath $log -Append | Out-String
+
+$appAddress = '0x90040000'
+if(-not (Test-Path $wavblob)) {
+    Write-Host 'samples.bin no existe; generando con pack_wavs.py...' -ForegroundColor Yellow
+    $genResult = Invoke-PythonScript 'pack_wavs.py' 2>&1 | Tee-Object -FilePath $log -Append | Out-String
+    if(Test-Path $wavblob) {
+        'RESULT=SAMPLES_BLOB_GENERATED' | Tee-Object -FilePath $log -Append
+        Write-Host 'samples.bin generado correctamente' -ForegroundColor Green
+    } else {
+        'RESULT=SAMPLES_BLOB_MISSING' | Tee-Object -FilePath $log -Append
+        Write-Host 'No se pudo generar build/samples.bin' -ForegroundColor Yellow
+        if($genResult) { $genResult | Tee-Object -FilePath $log -Append | Out-Null }
+    }
+}
+
+if(-not (Test-Path $wavblob)) {
+    $appAddress = '0x90040000:leave'
+}
+
+$resApp = & $dfu -a 0 -s $appAddress -D $fw -d ",0483:df11" 2>&1 | Tee-Object -FilePath $log -Append | Out-String
 
 if($resApp -notmatch 'Download done') {
     'RESULT=FLASH_FAIL' | Tee-Object -FilePath $log -Append
