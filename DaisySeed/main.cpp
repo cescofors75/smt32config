@@ -97,6 +97,7 @@ static DMA_HandleTypeDef  hdma_spi1_tx;
 #define CMD_FILTER_DISTORTION 0x24
 #define CMD_FILTER_DIST_MODE  0x25
 #define CMD_FILTER_SR_REDUCE  0x26
+#define CMD_MASTER_FX_ROUTE   0x27  /* [fxId(1), connected(1)] estado de ruteo del grafo */
 
 /* Master FX */
 #define CMD_DELAY_ACTIVE      0x30
@@ -218,6 +219,19 @@ static DMA_HandleTypeDef  hdma_spi1_tx;
 #define SYNTH_ENGINE_WTOSC 4
 #define SYNTH_ENGINE_SH101 5  /* I1: Roland SH-101 monosynth */
 #define SYNTH_ENGINE_FM2OP 6  /* I2: 2-operator FM */
+
+enum MasterFxRouteId : uint8_t {
+    MASTER_FX_ROUTE_FILTER = 0,
+    MASTER_FX_ROUTE_DELAY,
+    MASTER_FX_ROUTE_PHASER,
+    MASTER_FX_ROUTE_FLANGER,
+    MASTER_FX_ROUTE_COMP,
+    MASTER_FX_ROUTE_REVERB,
+    MASTER_FX_ROUTE_CHORUS,
+    MASTER_FX_ROUTE_TREMOLO,
+    MASTER_FX_ROUTE_WAVEFOLDER,
+    MASTER_FX_ROUTE_LIMITER,
+};
 
 /* Bulk */
 #define CMD_BULK_TRIGGERS     0xF0
@@ -609,31 +623,38 @@ DSY_SDRAM_BSS static Phaser     masterPhaser;
 
 /* Delay */
 static bool  delayActive   = false;
+static bool  delayRouted   = true;
 static float delayTime     = 250.0f;
 static float delayFeedback = 0.3f;
 static float delayMix      = 0.3f;
 
 /* Reverb */
 static bool  reverbActive   = false;
+static bool  reverbRouted   = true;
 static float reverbFeedback = 0.85f;
 static float reverbLpFreq   = 8000.0f;
 static float reverbMix      = 0.3f;
 
 /* Chorus */
 static bool  chorusActive = false;
+static bool  chorusRouted = true;
 static float chorusMix    = 0.4f;
 
 /* Tremolo */
 static bool  tremoloActive = false;
+static bool  tremoloRouted = true;
 
 /* Compressor */
 static bool  compActive = false;
+static bool  compRouted = true;
 
 /* Phaser */
 static bool  phaserActive   = false;
+static bool  phaserRouted   = true;
 
 /* Flanger (manual: delay buf + LFO) */
 static bool  flangerActive  = false;
+static bool  flangerRouted  = true;
 static float flangerRate    = 0.5f;
 static float flangerDepth   = 0.5f;
 static float flangerFb      = 0.3f;
@@ -644,13 +665,16 @@ static uint32_t flangerWp   = 0;
 
 /* Wavefolder + Limiter */
 static float waveFolderGain = 1.0f;
+static bool  waveFolderRouted = true;
 static bool  limiterActive  = false;
+static bool  limiterRouted  = true;
 
 /* ═══════════════════════════════════════════════════════════════════
  *  12. GLOBAL FILTER STATE
  * ═══════════════════════════════════════════════════════════════════ */
 static BiquadEQ  gFilterL, gFilterR;
 static BiquadEQ  gFilter2L, gFilter2R; /* 2nd stage para FTYPE_RESONANT global */
+static bool    gFilterRouted  = true;
 static uint8_t gFilterType    = FTYPE_NONE;
 static float   gFilterCutoff  = 10000.0f;
 static float   gFilterQ       = 0.707f;
@@ -660,6 +684,43 @@ static uint8_t gFilterDistMode= DMODE_SOFT;
 static uint32_t gFilterSrReduce = 0;  /* 0 = disabled */
 static float   gSrHoldL = 0, gSrHoldR = 0;
 static uint32_t gSrCounter = 0;
+
+static bool* GetMasterFxRouteFlag(uint8_t fxId)
+{
+    switch(fxId)
+    {
+        case MASTER_FX_ROUTE_FILTER:     return &gFilterRouted;
+        case MASTER_FX_ROUTE_DELAY:      return &delayRouted;
+        case MASTER_FX_ROUTE_PHASER:     return &phaserRouted;
+        case MASTER_FX_ROUTE_FLANGER:    return &flangerRouted;
+        case MASTER_FX_ROUTE_COMP:       return &compRouted;
+        case MASTER_FX_ROUTE_REVERB:     return &reverbRouted;
+        case MASTER_FX_ROUTE_CHORUS:     return &chorusRouted;
+        case MASTER_FX_ROUTE_TREMOLO:    return &tremoloRouted;
+        case MASTER_FX_ROUTE_WAVEFOLDER: return &waveFolderRouted;
+        case MASTER_FX_ROUTE_LIMITER:    return &limiterRouted;
+        default:                         return nullptr;
+    }
+}
+
+static inline bool IsGlobalFilterEngaged()
+{
+    return gFilterRouted
+        && (gFilterType != FTYPE_NONE
+            || gFilterBitDepth < 16
+            || fabsf(gFilterDist) > 0.0001f
+            || gFilterSrReduce > 0);
+}
+
+static inline bool IsDelayEngaged()      { return delayRouted && delayActive && delayMix > 0.0001f; }
+static inline bool IsPhaserEngaged()     { return phaserRouted && phaserActive; }
+static inline bool IsFlangerEngaged()    { return flangerRouted && flangerActive && flangerMix > 0.0001f; }
+static inline bool IsCompEngaged()       { return compRouted && compActive; }
+static inline bool IsReverbEngaged()     { return reverbRouted && reverbActive && reverbMix > 0.0001f; }
+static inline bool IsChorusEngaged()     { return chorusRouted && chorusActive && chorusMix > 0.0001f; }
+static inline bool IsTremoloEngaged()    { return tremoloRouted && tremoloActive; }
+static inline bool IsWaveFolderEngaged() { return waveFolderRouted && waveFolderGain > 1.01f; }
+static inline bool IsLimiterEngaged()    { return limiterRouted && limiterActive; }
 
 /* ═══════════════════════════════════════════════════════════════════
  *  13. PER-PAD STATE
@@ -1305,18 +1366,52 @@ static inline float VolumeByteToGain(uint8_t volumePct)
 
 static inline float SoftClipKnee(float x)
 {
-    const float knee = 0.9f;
-    if(x > knee)
-    {
-        float t = x - knee;
-        return knee + t / (1.0f + t * t);
-    }
-    if(x < -knee)
-    {
-        float t = x + knee;
-        return -knee + t / (1.0f + t * t);
-    }
-    return x;
+    const float knee  = 0.985f;
+    const float drive = 2.2f;
+    float ax = fabsf(x);
+    if(ax <= knee)
+        return x;
+
+    float t = (ax - knee) / (1.0f - knee);
+    float shaped = knee + (1.0f - knee) * (tanhf(drive * t) / tanhf(drive));
+    if(shaped > 1.0f)
+        shaped = 1.0f;
+    return copysignf(shaped, x);
+}
+
+static void ResetMasterProcessingState()
+{
+    delayActive = false;
+    reverbActive = false;
+    chorusActive = false;
+    tremoloActive = false;
+    compActive = false;
+    phaserActive = false;
+    flangerActive = false;
+    waveFolderGain = 1.0f;
+    limiterActive = false;
+
+    delayRouted = true;
+    reverbRouted = true;
+    chorusRouted = true;
+    tremoloRouted = true;
+    compRouted = true;
+    phaserRouted = true;
+    flangerRouted = true;
+    waveFolderRouted = true;
+    limiterRouted = true;
+
+    gFilterRouted = true;
+    gFilterType = FTYPE_NONE;
+    gFilterCutoff = 10000.0f;
+    gFilterQ = 0.707f;
+    gFilterBitDepth = 16;
+    gFilterDist = 0.0f;
+    gFilterDistMode = DMODE_SOFT;
+    gFilterSrReduce = 0;
+    gSrHoldL = 0.0f;
+    gSrHoldR = 0.0f;
+    gSrCounter = 0;
 }
 
 static inline float TriFromPhase(float ph)
@@ -2560,6 +2655,50 @@ static uint8_t ActiveVoices(){
     return c;
 }
 
+static void SilenceVoicesInPadRange(uint8_t startPad, uint8_t endPad)
+{
+    if(endPad > MAX_PADS)
+        endPad = MAX_PADS;
+    for(int voiceIndex = 0; voiceIndex < MAX_VOICES; voiceIndex++)
+    {
+        if(!voices[voiceIndex].active)
+            continue;
+        uint8_t pad = voices[voiceIndex].pad;
+        if(pad >= startPad && pad < endPad)
+            voices[voiceIndex].active = false;
+    }
+}
+
+static void ResetTrackRuntimeState(uint8_t track)
+{
+    if(track >= MAX_PADS)
+        return;
+
+    trkFilter[track].Reset();
+    trkFilter2[track].Reset();
+    trkEchoWp[track] = 0;
+    trkFlgWp[track] = 0;
+    trkCompEnv[track] = 0.0f;
+    trackPeak[track] = 0.0f;
+    memset(trkEchoBuf[track], 0, sizeof(trkEchoBuf[track]));
+    memset(trkFlgBuf[track],  0, sizeof(trkFlgBuf[track]));
+}
+
+static void PreparePadRangeForReload(uint8_t startPad, uint8_t endPad)
+{
+    if(endPad > MAX_PADS)
+        endPad = MAX_PADS;
+
+    SilenceVoicesInPadRange(startPad, endPad);
+    for(uint8_t pad = startPad; pad < endPad; pad++)
+    {
+        sampleLoaded[pad] = false;
+        sampleLength[pad] = 0;
+        sampleTotalSamples[pad] = 0;
+        ResetTrackRuntimeState(pad);
+    }
+}
+
 /* ─── Daisy Sequencer: fire all active steps for the current step index ───
  * Called from inside AudioCallback — sample-accurate, zero SPI latency.
  * TriggerPad() is safe to call here: it modifies voices[] before the
@@ -2596,10 +2735,11 @@ static void DsqFireStep() {
                 maxS = (uint32_t)(noteSec * (float)SAMPLE_RATE);
             }
             /* Param locks (solo aplican a tracks de sampler) */
-            if(s.cutoffEn){
+            if(s.cutoffEn && trkFilterType[t]){
                 float f = clampF((float)s.cutoffHz, 20.f, 20000.f);
-                trkFilter[t].SetType(FTYPE_LOWPASS, f, trkFilterQ[t], (float)SAMPLE_RATE);
-                trkFilterType[t] = FTYPE_LOWPASS;
+                trkFilter[t].SetType(trkFilterType[t], f, trkFilterQ[t], (float)SAMPLE_RATE);
+                if(trkFilterType[t] == FTYPE_RESONANT)
+                    trkFilter2[t].SetType(FTYPE_RESONANT, f, trkFilterQ[t], (float)SAMPLE_RATE);
                 trkFilterCut[t]  = f;
             }
             if(s.reverbEn)
@@ -3101,7 +3241,7 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
         float R = busR * gainOut;
 
         /* ── Global filter ── */
-        if(gFilterType != FTYPE_NONE){
+        if(IsGlobalFilterEngaged()){
             L = gFilterL.Process(L);
             R = gFilterR.Process(R);
             if(gFilterType == FTYPE_RESONANT){
@@ -3113,13 +3253,15 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
         }
 
         /* ── Global bitcrush + distortion ── */
-        L = BitCrush(L, gFilterBitDepth);
-        R = BitCrush(R, gFilterBitDepth);
-        L = ApplyDist(L, gFilterDist, gFilterDistMode);
-        R = ApplyDist(R, gFilterDist, gFilterDistMode);
+        if(IsGlobalFilterEngaged()){
+            L = BitCrush(L, gFilterBitDepth);
+            R = BitCrush(R, gFilterBitDepth);
+            L = ApplyDist(L, gFilterDist, gFilterDistMode);
+            R = ApplyDist(R, gFilterDist, gFilterDistMode);
+        }
 
         /* ── Global SAMPLE_RATE reduce ── */
-        if(gFilterSrReduce > 0 && gFilterSrReduce < (uint32_t)SAMPLE_RATE){
+        if(IsGlobalFilterEngaged() && gFilterSrReduce > 0 && gFilterSrReduce < (uint32_t)SAMPLE_RATE){
             uint32_t step = (uint32_t)SAMPLE_RATE / gFilterSrReduce;
             if(step < 1) step = 1;
             gSrCounter++;
@@ -3132,7 +3274,7 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
         }
 
         /* ── Delay (with send bus input) ── */
-        if(delayActive){
+        if(IsDelayEngaged()){
             float wet = masterDelay.Read();
             masterDelay.Write(L + delayBusL + wet * delayFeedback);
             L = L * (1.0f - delayMix) + wet * delayMix;
@@ -3140,27 +3282,27 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
         }
 
         /* ── Compressor ── */
-        if(compActive){
+        if(IsCompEngaged()){
             L = masterComp.Process(L);
             R = masterComp.Process(R);
         }
 
         /* ── Wavefolder ── */
-        if(waveFolderGain > 1.01f){
+        if(IsWaveFolderEngaged()){
             masterFold.SetIncrement(waveFolderGain);
             L = masterFold.Process(L);
             R = masterFold.Process(R);
         }
 
         /* ── Phaser ── */
-        if(phaserActive){
+        if(IsPhaserEngaged()){
             L = masterPhaser.Process(L);
             /* Apply partially to R for stereo width */
             R = R * 0.7f + L * 0.3f;
         }
 
         /* ── Flanger (manual) ── */
-        if(flangerActive){
+        if(IsFlangerEngaged()){
             flangerBuf[flangerWp] = L;
             float tri = flangerPhase < 0.5f ? flangerPhase*2.f : 2.f - flangerPhase*2.f;
             uint32_t tap = 4 + (uint32_t)(tri * flangerDepth * 200.f);
@@ -3176,13 +3318,13 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
         }
 
         /* ── Tremolo ── */
-        if(tremoloActive){
+        if(IsTremoloEngaged()){
             float t = masterTremolo.Process(1.0f);
             L *= t; R *= t;
         }
 
         /* ── Chorus (with send bus input) ── */
-        if(chorusActive){
+        if(IsChorusEngaged()){
             float wet = masterChorus.Process(L + chorusBusL);
             L = L * (1.0f - chorusMix) + wet * chorusMix;
             R = R * (1.0f - chorusMix) + wet * chorusMix;
@@ -3190,7 +3332,7 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
 
         /* ── Reverb (with send bus input) ── */
         float revL = 0, revR = 0;
-        if(reverbActive){
+        if(IsReverbEngaged()){
             masterReverb.Process(L + reverbBusL, R + reverbBusL,
                                 &revL, &revR);
             L = L * (1.0f - reverbMix) + revL * reverbMix;
@@ -3198,7 +3340,7 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
         }
 
         /* ── Limiter / Soft clip ── */
-        if(limiterActive){
+        if(IsLimiterEngaged()){
             L = clampF(L, -1.0f, 1.0f);
             R = clampF(R, -1.0f, 1.0f);
         } else {
@@ -3466,6 +3608,12 @@ static void ProcessCommand()
         break;
     case CMD_FILTER_SR_REDUCE:
         if(len >= 4) memcpy(&gFilterSrReduce, p, 4);
+        break;
+    case CMD_MASTER_FX_ROUTE:
+        if(len >= 2){
+            if(bool* routed = GetMasterFxRouteFlag(p[0]))
+                *routed = (p[1] != 0);
+        }
         break;
 
     /* ════════════════════════════════════════════
@@ -4110,6 +4258,7 @@ static void ProcessCommand()
         if(len >= sizeof(SdLoadKitPayload)){
             SdLoadKitPayload lk;
             memcpy(&lk, p, sizeof(lk));
+            lk.kitName[31] = 0;
             char path[96];
             snprintf(path, sizeof(path), "%s/%s", SD_DATA_ROOT, lk.kitName);
             DIR dir; FILINFO fno;
@@ -4118,10 +4267,7 @@ static void ProcessCommand()
             if(maxIdx > MAX_PADS) maxIdx = MAX_PADS;
             bool canonicalLiveRange = (lk.startPad == 0 && lk.maxPads >= 16);
 
-            for(uint8_t i = lk.startPad; i < maxIdx; i++){
-                sampleLoaded[i] = false;
-                sampleLength[i] = 0;
-            }
+            PreparePadRangeForReload(lk.startPad, maxIdx);
 
             if(sdPresent && f_opendir(&dir, path) == FR_OK){
                 if(canonicalLiveRange){
@@ -4156,6 +4302,7 @@ static void ProcessCommand()
                 }
 
                 strncpy(currentKitName, lk.kitName, 31);
+                currentKitName[31] = 0;
                 hw.PrintLine("SD: Kit '%s' loaded pads %d-%d",
                                lk.kitName, lk.startPad, padIdx-1);
                 /* Notify Master */
@@ -4424,10 +4571,7 @@ static void ProcessCommand()
             trkEnvDecayMs[i]  = 250.0f;
         }
         masterGain = 1.0f; seqVolume = 1.0f; liveVolume = 1.0f; livePitch = 1.0f;
-        delayActive = false; reverbActive = false; chorusActive = false;
-        tremoloActive = false; compActive = false; phaserActive = false;
-        flangerActive = false; waveFolderGain = 1.0f; limiterActive = false;
-        gFilterType = FTYPE_NONE; gFilterBitDepth = 16; gFilterDist = 0;
+        ResetMasterProcessingState();
         scActive = false; scEnv = 0;
         anySolo = false;
         masterPeak = 0;
@@ -5474,6 +5618,8 @@ static void InitArrays()
 static void InitFX()
 {
     float sr = (float)SAMPLE_RATE;
+
+    ResetMasterProcessingState();
 
     masterDelay.Init();
     masterDelay.SetDelay(sr * 0.25f);
