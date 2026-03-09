@@ -2181,7 +2181,7 @@ static void ApplySynthPreset(uint8_t engine, uint8_t presetId)
                 default:
                 case 0:
                     synth808.LoadPreset(TR808::Presets::Classic808);
-                    set(TR808::INST_KICK, 0, 0.45f); set(TR808::INST_KICK, 1, 55.0f); set(TR808::INST_KICK, 2, 0.30f); set(TR808::INST_KICK, 4, 0.15f); set(TR808::INST_KICK, 5, 8.0f); set(TR808::INST_KICK, 6, 0.08f); set(TR808::INST_KICK, 3, 0.80f);
+                    set(TR808::INST_KICK, 0, 0.48f); set(TR808::INST_KICK, 1, 52.0f); set(TR808::INST_KICK, 2, 0.22f); set(TR808::INST_KICK, 4, 0.18f); set(TR808::INST_KICK, 5, 3.0f); set(TR808::INST_KICK, 6, 0.12f); set(TR808::INST_KICK, 3, 0.82f);
                     set(TR808::INST_SNARE, 0, 0.18f); set(TR808::INST_SNARE, 1, 185.0f); set(TR808::INST_SNARE, 2, 0.50f); set(TR808::INST_SNARE, 4, 0.60f); set(TR808::INST_SNARE, 3, 0.80f);
                     set(TR808::INST_CLAP, 0, 0.28f); set(TR808::INST_CLAP, 2, 0.70f); set(TR808::INST_CLAP, 3, 0.80f);
                     set(TR808::INST_HIHAT_C, 0, 0.042f); set(TR808::INST_HIHAT_C, 3, 0.80f);
@@ -2191,7 +2191,7 @@ static void ApplySynthPreset(uint8_t engine, uint8_t presetId)
                     break;
                 case 1:
                     synth808.LoadPreset(TR808::Presets::HipHop);
-                    set(TR808::INST_KICK, 0, 0.80f); set(TR808::INST_KICK, 1, 46.0f); set(TR808::INST_KICK, 2, 0.55f); set(TR808::INST_KICK, 4, 0.24f); set(TR808::INST_KICK, 5, 10.5f); set(TR808::INST_KICK, 6, 0.12f); set(TR808::INST_KICK, 3, 0.92f);
+                    set(TR808::INST_KICK, 0, 0.82f); set(TR808::INST_KICK, 1, 44.0f); set(TR808::INST_KICK, 2, 0.40f); set(TR808::INST_KICK, 4, 0.28f); set(TR808::INST_KICK, 5, 2.4f); set(TR808::INST_KICK, 6, 0.18f); set(TR808::INST_KICK, 3, 0.92f);
                     set(TR808::INST_SNARE, 0, 0.28f); set(TR808::INST_SNARE, 1, 160.0f); set(TR808::INST_SNARE, 2, 0.35f); set(TR808::INST_SNARE, 4, 0.72f); set(TR808::INST_SNARE, 3, 0.74f);
                     set(TR808::INST_CLAP, 0, 0.34f); set(TR808::INST_CLAP, 2, 0.58f); set(TR808::INST_CLAP, 3, 0.72f);
                     set(TR808::INST_HIHAT_C, 0, 0.030f); set(TR808::INST_HIHAT_C, 3, 0.55f);
@@ -2202,7 +2202,7 @@ static void ApplySynthPreset(uint8_t engine, uint8_t presetId)
                     break;
                 case 2:
                     synth808.LoadPreset(TR808::Presets::Techno);
-                    set(TR808::INST_KICK, 0, 0.36f); set(TR808::INST_KICK, 1, 62.0f); set(TR808::INST_KICK, 2, 0.62f); set(TR808::INST_KICK, 4, 0.10f); set(TR808::INST_KICK, 5, 13.0f); set(TR808::INST_KICK, 6, 0.05f); set(TR808::INST_KICK, 3, 0.95f);
+                    set(TR808::INST_KICK, 0, 0.34f); set(TR808::INST_KICK, 1, 56.0f); set(TR808::INST_KICK, 2, 0.50f); set(TR808::INST_KICK, 4, 0.12f); set(TR808::INST_KICK, 5, 4.0f); set(TR808::INST_KICK, 6, 0.035f); set(TR808::INST_KICK, 3, 0.95f);
                     set(TR808::INST_SNARE, 0, 0.16f); set(TR808::INST_SNARE, 1, 210.0f); set(TR808::INST_SNARE, 2, 0.68f); set(TR808::INST_SNARE, 4, 0.45f); set(TR808::INST_SNARE, 3, 0.82f);
                     set(TR808::INST_CLAP, 0, 0.20f); set(TR808::INST_CLAP, 2, 0.85f); set(TR808::INST_CLAP, 3, 0.62f);
                     set(TR808::INST_HIHAT_C, 0, 0.050f); set(TR808::INST_HIHAT_C, 3, 0.82f);
@@ -2212,7 +2212,7 @@ static void ApplySynthPreset(uint8_t engine, uint8_t presetId)
                     break;
                 case 3:
                     synth808.LoadPreset(TR808::Presets::Latin);
-                    set(TR808::INST_KICK, 0, 0.30f); set(TR808::INST_KICK, 1, 58.0f); set(TR808::INST_KICK, 2, 0.18f); set(TR808::INST_KICK, 4, 0.10f); set(TR808::INST_KICK, 5, 7.0f); set(TR808::INST_KICK, 6, 0.06f); set(TR808::INST_KICK, 3, 0.68f);
+                    set(TR808::INST_KICK, 0, 0.30f); set(TR808::INST_KICK, 1, 54.0f); set(TR808::INST_KICK, 2, 0.16f); set(TR808::INST_KICK, 4, 0.12f); set(TR808::INST_KICK, 5, 2.6f); set(TR808::INST_KICK, 6, 0.08f); set(TR808::INST_KICK, 3, 0.68f);
                     set(TR808::INST_LOW_TOM, 0, 0.48f); set(TR808::INST_LOW_TOM, 1, 92.0f); set(TR808::INST_LOW_TOM, 5, 0.14f); set(TR808::INST_LOW_TOM, 3, 0.86f);
                     set(TR808::INST_MID_TOM, 0, 0.42f); set(TR808::INST_MID_TOM, 1, 144.0f); set(TR808::INST_MID_TOM, 5, 0.14f); set(TR808::INST_MID_TOM, 3, 0.84f);
                     set(TR808::INST_HI_TOM, 0, 0.34f); set(TR808::INST_HI_TOM, 1, 215.0f); set(TR808::INST_HI_TOM, 5, 0.10f); set(TR808::INST_HI_TOM, 3, 0.92f);
@@ -2477,6 +2477,17 @@ static void ApplySynthPreset(uint8_t engine, uint8_t presetId)
         default:
             break;
     }
+}
+
+static void ApplyDefaultSynthPresets()
+{
+    ApplySynthPreset(SYNTH_ENGINE_808, 0);
+    ApplySynthPreset(SYNTH_ENGINE_909, 0);
+    ApplySynthPreset(SYNTH_ENGINE_505, 0);
+    ApplySynthPreset(SYNTH_ENGINE_303, 0);
+    ApplySynthPreset(SYNTH_ENGINE_WTOSC, 0);
+    ApplySynthPreset(SYNTH_ENGINE_SH101, 0);
+    ApplySynthPreset(SYNTH_ENGINE_FM2OP, 0);
 }
 
 /* ═══════════════════════════════════════════════════════════════════
@@ -4429,6 +4440,7 @@ static void ProcessCommand()
         wtOsc.Init((float)SAMPLE_RATE);
         synthSH101.Init((float)SAMPLE_RATE);
         synthFM2Op.Init((float)SAMPLE_RATE);
+        ApplyDefaultSynthPresets();
         for(int i=0;i<16;i++) trackWtNote[i]    = (uint8_t)(60 + (i % 12));
         for(int i=0;i<16;i++) trackSH101Note[i] = (uint8_t)(60 + (i % 12));
         for(int i=0;i<16;i++) trackFM2OpNote[i] = (uint8_t)(60 + (i % 12));
@@ -4785,6 +4797,7 @@ static void ProcessCommand()
             {
                 StopPadVoices(track);
                 ReleaseTrackEngine(track, oldEngine);
+                padLoop[track] = false;
             }
             dsqTrackEngine[track] = newEngine;
         }
@@ -5509,6 +5522,7 @@ static void InitFX()
     wtOsc.Init(sr);
     synthSH101.Init(sr);  /* I1 */
     synthFM2Op.Init(sr);  /* I2 */
+    ApplyDefaultSynthPresets();
     dcBlockL.Init(sr);    /* M3 */
     dcBlockR.Init(sr);
     for(int i=0; i<16; i++) trackWtNote[i]    = (uint8_t)(60 + (i % 12));

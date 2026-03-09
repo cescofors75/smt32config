@@ -173,11 +173,11 @@ struct SVF {
 class Kick {
 public:
     float decay      = 0.45f;
-    float pitch      = 55.0f;
-    float pitchDecay = 0.08f;
-    float pitchAmt   = 8.0f;
+    float pitch      = 52.0f;
+    float pitchDecay = 0.12f;
+    float pitchAmt   = 3.0f;
     float attack     = 0.004f;
-    float drive      = 0.3f;
+    float drive      = 0.22f;
     float subLevel   = 0.15f;
     float volume     = 1.0f;
     float drift      = 0.15f;  /* A4: analog pitch drift [0..1] */
