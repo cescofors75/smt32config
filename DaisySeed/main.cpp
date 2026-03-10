@@ -156,6 +156,7 @@ static DMA_HandleTypeDef  hdma_spi1_tx;
 #define CMD_TRACK_EQ_LOW      0x63
 #define CMD_TRACK_EQ_MID      0x64
 #define CMD_TRACK_EQ_HIGH     0x65
+#define CMD_TRACK_FX_ROUTE    0x66  /* [track(1), connected(1)] per-track FX routing */
 
 /* Per-Pad FX */
 #define CMD_PAD_FILTER        0x70
@@ -383,6 +384,8 @@ DSY_SDRAM_BSS static int16_t sampleStorage[MAX_PADS][MAX_SAMPLE_BYTES / 2];
 static uint32_t sampleLength[MAX_PADS];
 static uint32_t sampleTotalSamples[MAX_PADS];
 static bool     sampleLoaded[MAX_PADS];
+static volatile bool padLoading[MAX_PADS];  /* true while LoadWavToPad is writing */
+static volatile bool kitMuteActive = false; /* true → AudioCallback outputs silence */
 
 /* ═══════════════════════════════════════════════════════════════════
  *  7. VOCES POLIFÓNICAS
@@ -776,6 +779,9 @@ static float trackPanF[MAX_PADS];          /* -1.0..+1.0 */
 static bool  trackMute[MAX_PADS];
 static bool  trackSolo[MAX_PADS];
 static bool  anySolo = false;
+
+/* Per-track FX routing (false = FX chain bypassed; auto-enabled when ESP32 sends FX commands) */
+static bool    trkFxRouted[MAX_PADS];  /* default false; auto-set true on CMD_TRACK_FILTER etc. */
 
 /* Per-track filter */
 static BiquadEQ  trkFilter[MAX_PADS];
@@ -2593,7 +2599,7 @@ static void TriggerPad(uint8_t pad, uint8_t velocity,
                        uint32_t maxSamples,
                        float sourceVolume)
 {
-    if(pad >= MAX_PADS || !sampleLoaded[pad]) return;
+    if(pad >= MAX_PADS || !sampleLoaded[pad] || padLoading[pad]) return;
 
     /* Find free slot or steal oldest */
     int slot = -1;
@@ -2674,12 +2680,24 @@ static void ResetTrackRuntimeState(uint8_t track)
     if(track >= MAX_PADS)
         return;
 
+    /* Clear per-track FX configuration — prevents stale filter/effects
+     * from persisting after kit reload or track clear                  */
+    trkFilterType[track] = 0;
+    trkFilterCut[track]  = 1000.0f;
+    trkFilterQ[track]    = 0.707f;
     trkFilter[track].Reset();
     trkFilter2[track].Reset();
-    trkEchoWp[track] = 0;
-    trkFlgWp[track] = 0;
-    trkCompEnv[track] = 0.0f;
-    trackPeak[track] = 0.0f;
+    trkDistDrive[track]  = 0.0f;
+    trkDistMode[track]   = DMODE_SOFT;
+    trkBitDepth[track]   = 16;
+    trkEchoActive[track] = false;
+    trkEchoWp[track]     = 0;
+    trkFlgActive[track]  = false;
+    trkFlgWp[track]      = 0;
+    trkCompActive[track] = false;
+    trkCompEnv[track]    = 0.0f;
+    trackPeak[track]     = 0.0f;
+    trkFxRouted[track]   = false;
     memset(trkEchoBuf[track], 0, sizeof(trkEchoBuf[track]));
     memset(trkFlgBuf[track],  0, sizeof(trkFlgBuf[track]));
 }
@@ -2689,6 +2707,14 @@ static void PreparePadRangeForReload(uint8_t startPad, uint8_t endPad)
     if(endPad > MAX_PADS)
         endPad = MAX_PADS;
 
+    /* 1. Mark ALL pads loading FIRST — AudioCallback will skip them entirely.
+     *    This MUST happen before SilenceVoicesInPadRange / ResetTrackRuntimeState
+     *    to prevent the ISR from re-triggering voices or reading filter state
+     *    while we modify it (data race).                                       */
+    for(uint8_t pad = startPad; pad < endPad; pad++)
+        padLoading[pad] = true;
+
+    /* 2. Now safe to kill active voices and reset track state */
     SilenceVoicesInPadRange(startPad, endPad);
     for(uint8_t pad = startPad; pad < endPad; pad++)
     {
@@ -2716,8 +2742,8 @@ static void DsqFireStep() {
         int8_t  eng     = dsqTrackEngine[t];
         bool    isSynth = (eng >= 0 && eng <= SYNTH_ENGINE_FM2OP);
 
-        /* Tracks de sampler: verificar que hay muestra cargada */
-        if(!isSynth && !sampleLoaded[t]) continue;
+        /* Tracks de sampler: verificar que hay muestra cargada y no en recarga */
+        if(!isSynth && (!sampleLoaded[t] || padLoading[t])) continue;
 
         /* Probability gate */
         if(s.probability < 100){
@@ -2734,8 +2760,8 @@ static void DsqFireStep() {
                 float noteSec = stepSec * (4.0f / (float)s.noteLenDiv);
                 maxS = (uint32_t)(noteSec * (float)SAMPLE_RATE);
             }
-            /* Param locks (solo aplican a tracks de sampler) */
-            if(s.cutoffEn && trkFilterType[t]){
+            /* Param locks (solo aplican a tracks de sampler y con FX ruteado) */
+            if(s.cutoffEn && trkFilterType[t] && trkFxRouted[t]){
                 float f = clampF((float)s.cutoffHz, 20.f, 20000.f);
                 trkFilter[t].SetType(trkFilterType[t], f, trkFilterQ[t], (float)SAMPLE_RATE);
                 if(trkFilterType[t] == FTYPE_RESONANT)
@@ -2819,6 +2845,10 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
     if(kAudioSafeMode)
         return;
 
+    /* ── Kit loading: output silence to avoid SDRAM bus contention / data races ── */
+    if(kitMuteActive)
+        return;
+
     float mixPeak = 0.0f;
 
     /* ═ Pre-calcular: primer track que usa cada motor de síntesis (índice 0–4) ═ */
@@ -2890,6 +2920,9 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
             uint8_t p = vx.pad;
 
             /* Position / bounds */
+            /* Skip voices on pads being reloaded */
+            if(padLoading[p]){ vx.active = false; continue; }
+
             uint32_t idx = (uint32_t)fabsf(vx.pos);
             uint32_t endLen = (vx.maxLen > 0 && vx.maxLen < sampleLength[p])
                              ? vx.maxLen : sampleLength[p];
@@ -2993,6 +3026,9 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
             if(padTurnOn[p] && padTurnNoise[p] > 0.01f)
                 s += RandFloat() * padTurnNoise[p] * 0.1f;
 
+            /* ── Per-track FX (only when routed in graph) ── */
+            if(trkFxRouted[p]){
+
             /* ── Per-track filter ── */
             if(trkFilterType[p]){
                 if(trkLfoActive[p] && trkLfoTarget[p] == LFO_TGT_FILTER && !trkFilterLfoSet[p]){
@@ -3058,6 +3094,8 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
                 }
             }
 
+            } /* end trkFxRouted[p] */
+
             /* ── Sidechain ── */
             float absS = fabsf(s);
             if(scActive && p == scSrc) sideSrc = fmaxf(sideSrc, absS);
@@ -3116,6 +3154,7 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
         /* al sample s y lo suma a busL/busR. Si t<0 -> bus directo sin FX.     */
         auto synthTobus = [&](float s, int8_t t){
             if(t < 0 || t >= MAX_PADS){ busL += s; busR += s; return; }
+            if(trkFxRouted[t]){
             /* filtro */
             if(trkFilterType[t]){
                 s = trkFilter[t].Process(s);
@@ -3167,6 +3206,7 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
                     s *= g;
                 }
             }
+            } /* end trkFxRouted */
             /* mute / solo */
             bool muted = trackMute[t];
             if(anySolo && !trackSolo[t]) muted = true;
@@ -3796,6 +3836,7 @@ static void ProcessCommand()
             uint8_t t = p[0]; if(t >= MAX_PADS) break;
             uint8_t ftype = p[1];
             trkFilterType[t] = ftype;
+            if(ftype) trkFxRouted[t] = true;   /* auto-enable per-track FX chain */
             float cut, res, gain = 0.f;
             memcpy(&cut, p + 4, 4);
             memcpy(&res, p + 8, 4);
@@ -3824,18 +3865,23 @@ static void ProcessCommand()
             float d; memcpy(&d, p + 4, 4);            // amount desde bytes 4-7
             if(d > 1.0f) d /= 100.0f;                // normalizar porcentaje→fracción
             trkDistDrive[t] = clampF(d, 0.f, 1.f);
+            if(trkDistDrive[t] > 0.001f) trkFxRouted[t] = true;
         } else if(len >= 2 && p[0] < MAX_PADS){
             trkDistDrive[p[0]] = p[1] / 255.0f;
+            if(trkDistDrive[p[0]] > 0.001f) trkFxRouted[p[0]] = true;
         }
         break;
     case CMD_TRACK_BITCRUSH:
-        if(len >= 2 && p[0] < MAX_PADS)
+        if(len >= 2 && p[0] < MAX_PADS){
             trkBitDepth[p[0]] = (p[1] < 4) ? 4 : (p[1] > 16 ? 16 : p[1]);
+            if(trkBitDepth[p[0]] < 16) trkFxRouted[p[0]] = true;
+        }
         break;
     case CMD_TRACK_ECHO:
         if(len >= 16 && p[0] < MAX_PADS){
             uint8_t t = p[0];
             trkEchoActive[t] = (p[1] != 0);
+            if(trkEchoActive[t]) trkFxRouted[t] = true;
             float timeMs, fb, mix;
             memcpy(&timeMs, p + 4, 4);
             memcpy(&fb,     p + 8, 4);
@@ -3852,6 +3898,7 @@ static void ProcessCommand()
         if(len >= 16 && p[0] < MAX_PADS){
             uint8_t t = p[0];
             trkFlgActive[t] = (p[1] != 0);
+            if(trkFlgActive[t]) trkFxRouted[t] = true;
             float depth, rate, fb;
             memcpy(&depth, p + 4, 4);
             memcpy(&rate,  p + 8, 4);
@@ -3870,6 +3917,7 @@ static void ProcessCommand()
         if(len >= 12 && p[0] < MAX_PADS){
             uint8_t t = p[0];
             trkCompActive[t] = (p[1] != 0);
+            if(trkCompActive[t]) trkFxRouted[t] = true;
             float thresh, ratio;
             memcpy(&thresh, p + 4, 4);
             memcpy(&ratio,  p + 8, 4);
@@ -3892,6 +3940,7 @@ static void ProcessCommand()
     case CMD_TRACK_CLEAR_FX:
         if(len >= 1 && p[0] < MAX_PADS){
             uint8_t t = p[0];
+            trkFxRouted[t]   = false;
             trkFilterType[t] = 0;  trkFilter[t].Reset();
             trkDistDrive[t]  = 0;  trkDistMode[t] = 0;
             trkBitDepth[t]   = 16;
@@ -3963,6 +4012,7 @@ static void ProcessCommand()
             trkEqLowDb[p[0]] = (int8_t)p[1];
             trkEqLow[p[0]].SetType(FTYPE_LOWSHELF, 200.f, 0.707f, (float)SAMPLE_RATE,
                                     (float)(int8_t)p[1]);
+            if((int8_t)p[1] != 0) trkFxRouted[p[0]] = true;
         }
         break;
     case CMD_TRACK_EQ_MID:
@@ -3970,6 +4020,7 @@ static void ProcessCommand()
             trkEqMidDb[p[0]] = (int8_t)p[1];
             trkEqMid[p[0]].SetType(FTYPE_PEAKING, 1000.f, 1.0f, (float)SAMPLE_RATE,
                                    (float)(int8_t)p[1]);
+            if((int8_t)p[1] != 0) trkFxRouted[p[0]] = true;
         }
         break;
     case CMD_TRACK_EQ_HIGH:
@@ -3977,7 +4028,12 @@ static void ProcessCommand()
             trkEqHighDb[p[0]] = (int8_t)p[1];
             trkEqHigh[p[0]].SetType(FTYPE_HIGHSHELF, 4000.f, 0.707f, (float)SAMPLE_RATE,
                                     (float)(int8_t)p[1]);
+            if((int8_t)p[1] != 0) trkFxRouted[p[0]] = true;
         }
+        break;
+    case CMD_TRACK_FX_ROUTE:
+        if(len >= 2 && p[0] < MAX_PADS)
+            trkFxRouted[p[0]] = (p[1] != 0);
         break;
 
     /* ── Track Phaser / Tremolo / Pitch / Gate ── */
@@ -4267,6 +4323,9 @@ static void ProcessCommand()
             if(maxIdx > MAX_PADS) maxIdx = MAX_PADS;
             bool canonicalLiveRange = (lk.startPad == 0 && lk.maxPads >= 16);
 
+            /* ── Mute audio output completely during SD loading ── */
+            kitMuteActive = true;
+
             PreparePadRangeForReload(lk.startPad, maxIdx);
 
             if(sdPresent && f_opendir(&dir, path) == FR_OK){
@@ -4315,6 +4374,11 @@ static void ProcessCommand()
                 PushEvent(EVT_SD_KIT_LOADED, loadedCount,
                           mask, lk.kitName);
             }
+
+            /* ── Clear padLoading for range and unmute audio ── */
+            for(uint8_t _idx = lk.startPad; _idx < maxIdx; _idx++)
+                padLoading[_idx] = false;
+            kitMuteActive = false;
         }
         break;
     }
@@ -4559,6 +4623,7 @@ static void ProcessCommand()
             trackReverbSend[i] = 0; trackDelaySend[i] = 0; trackChorusSend[i] = 0;
             trackPanF[i] = 0; trackMute[i] = false; trackSolo[i] = false;
             trkEqLowDb[i] = 0; trkEqMidDb[i] = 0; trkEqHighDb[i] = 0;
+            trkFxRouted[i] = false;  padLoading[i] = false;
             trkLfoActive[i] = false;
             trkLfoWave[i]   = LFO_WAVE_SINE;
             trkLfoTarget[i] = LFO_TGT_GAIN;
@@ -5232,8 +5297,17 @@ static bool InitSD()
 static bool LoadWavToPad(const char* filepath, uint8_t padIdx)
 {
     if(padIdx >= MAX_PADS) return false;
+
+    /* Mark pad as loading — AudioCallback will skip this pad entirely */
+    sampleLoaded[padIdx] = false;
+    sampleLength[padIdx] = 0;
+    padLoading[padIdx] = true;
+
     FIL fil;
-    if(f_open(&fil, filepath, FA_READ) != FR_OK) return false;
+    if(f_open(&fil, filepath, FA_READ) != FR_OK){
+        padLoading[padIdx] = false;
+        return false;
+    }
 
     /* Simple WAV header parse: find "data" chunk */
     uint8_t hdr[44];
@@ -5311,6 +5385,7 @@ static bool LoadWavToPad(const char* filepath, uint8_t padIdx)
     }
 
     sampleLoaded[padIdx] = (sampleLength[padIdx] > 0);
+    padLoading[padIdx] = false;
     f_close(&fil);
     return sampleLoaded[padIdx];
 }
@@ -5620,6 +5695,11 @@ static void InitFX()
     float sr = (float)SAMPLE_RATE;
 
     ResetMasterProcessingState();
+
+    for(int i = 0; i < MAX_PADS; i++){
+        trkFxRouted[i] = false;
+        padLoading[i]  = false;
+    }
 
     masterDelay.Init();
     masterDelay.SetDelay(sr * 0.25f);
