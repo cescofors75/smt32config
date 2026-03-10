@@ -564,7 +564,7 @@ struct BiquadEQ {
                 a1=b1; a2=(1.f-a)*a0i;
                 break;
             case FTYPE_PEAKING: {
-                float A = powf(10.f, gainDb/40.f);
+                float A = pow10f(gainDb / 40.f);
                 a0i = 1.f/(1.f + a/A);
                 b0 = (1.f + a*A)*a0i;
                 b1 = (-2.f*c_)*a0i;
@@ -573,7 +573,7 @@ struct BiquadEQ {
                 break;
             }
             case FTYPE_LOWSHELF: {
-                float A = powf(10.f, gainDb/40.f);
+                float A = pow10f(gainDb / 40.f);
                 float sq = 2.f*sqrtf(A)*a;
                 a0i = 1.f/((A+1.f)+(A-1.f)*c_+sq);
                 b0 = A*((A+1.f)-(A-1.f)*c_+sq)*a0i;
@@ -584,7 +584,7 @@ struct BiquadEQ {
                 break;
             }
             case FTYPE_HIGHSHELF: {
-                float A = powf(10.f, gainDb/40.f);
+                float A = pow10f(gainDb / 40.f);
                 float sq = 2.f*sqrtf(A)*a;
                 a0i = 1.f/((A+1.f)-(A-1.f)*c_+sq);
                 b0 = A*((A+1.f)+(A-1.f)*c_+sq)*a0i;
@@ -817,6 +817,7 @@ static uint32_t trkFlgWp[MAX_PADS];
 static bool  trkCompActive[MAX_PADS];
 static float trkCompThresh[MAX_PADS];
 static float trkCompRatio[MAX_PADS];
+static float trkCompExp[MAX_PADS];   /* pre-computed: 1.f - 1.f/ratio */
 static float trkCompEnv[MAX_PADS];
 
 /* Per-track EQ (3-band: low shelf 200Hz, mid peak 1kHz, high shelf 4kHz) */
@@ -1374,12 +1375,14 @@ static inline float SoftClipKnee(float x)
 {
     const float knee  = 0.985f;
     const float drive = 2.2f;
+    /* 1.007307f == 1.0f / SoftLimit(2.2f) — pre-computed constant denominator */
+    const float invSL = 1.007307f;
     float ax = fabsf(x);
     if(ax <= knee)
         return x;
 
     float t = (ax - knee) / (1.0f - knee);
-    float shaped = knee + (1.0f - knee) * (tanhf(drive * t) / tanhf(drive));
+    float shaped = knee + (1.0f - knee) * (SoftLimit(drive * t) * invSL);
     if(shaped > 1.0f)
         shaped = 1.0f;
     return copysignf(shaped, x);
@@ -2885,8 +2888,15 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
         }
 
         float busL = 0, busR = 0;
-        float reverbBusL = 0, delayBusL = 0, chorusBusL = 0;
+        float reverbBusL = 0, reverbBusR = 0;
+        float delayBusL  = 0, delayBusR  = 0;
+        float chorusBusL = 0, chorusBusR = 0;
         float sideSrc = 0;
+
+        /* Pre-compute send bus gates — stable across entire buffer */
+        const bool revEng = IsReverbEngaged();
+        const bool delEng = IsDelayEngaged();
+        const bool choEng = IsChorusEngaged();
 
         float lfoVal[MAX_PADS];
         uint8_t trkFilterLfoSet[MAX_PADS];
@@ -3042,7 +3052,7 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
                 s = trkFilter[p].Process(s);
                 if(trkFilterType[p] == FTYPE_RESONANT){
                     s = trkFilter2[p].Process(s);           /* 2nd pole pair → 24dB/oct */
-                    s = tanhf(s * 1.4f) * 0.714f;          /* soft saturation analógica */
+                    s = SoftLimit(s * 1.4f) * 0.714f;      /* soft saturation analógica */
                 }
             }
 
@@ -3088,7 +3098,7 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
                 else                     trkCompEnv[p] -= (trkCompEnv[p] - absS) * 0.03f;
                 if(trkCompEnv[p] > trkCompThresh[p] && trkCompEnv[p] > 0.001f){
                     float g = trkCompThresh[p] / trkCompEnv[p];
-                    g = powf(g, 1.f - 1.f/trkCompRatio[p]);
+                    g = powf(g, trkCompExp[p]);
                     if(g < 0.125f) g = 0.125f;
                     s *= g;
                 }
@@ -3127,11 +3137,19 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
             busL += outL * panL;
             busR += outR * panR;
 
-            /* ── Send buses ── */
-            float mono = (outL + outR) * 0.5f;
-            reverbBusL += mono * trackReverbSend[p];
-            delayBusL  += mono * trackDelaySend[p];
-            chorusBusL += mono * trackChorusSend[p];
+            /* ── Send buses (stereo) — only accumulate if master FX engaged ── */
+            if(revEng){
+                reverbBusL += outL * trackReverbSend[p];
+                reverbBusR += outR * trackReverbSend[p];
+            }
+            if(delEng){
+                delayBusL  += outL * trackDelaySend[p];
+                delayBusR  += outR * trackDelaySend[p];
+            }
+            if(choEng){
+                chorusBusL += outL * trackChorusSend[p];
+                chorusBusR += outR * trackChorusSend[p];
+            }
 
             /* ── Track peak ── */
             float pk = fmaxf(fabsf(outL), fabsf(outR));
@@ -3160,7 +3178,7 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
                 s = trkFilter[t].Process(s);
                 if(trkFilterType[t] == FTYPE_RESONANT){
                     s = trkFilter2[t].Process(s);
-                    s = tanhf(s * 1.4f) * 0.714f;
+                    s = SoftLimit(s * 1.4f) * 0.714f;
                 }
             }
             /* dist + bitcrush */
@@ -3201,7 +3219,7 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
                 else                     trkCompEnv[t] -= (trkCompEnv[t] - absS) * 0.03f;
                 if(trkCompEnv[t] > trkCompThresh[t] && trkCompEnv[t] > 0.001f){
                     float g = trkCompThresh[t] / trkCompEnv[t];
-                    g = powf(g, 1.f - 1.f/trkCompRatio[t]);
+                    g = powf(g, trkCompExp[t]);
                     if(g < 0.125f) g = 0.125f;
                     s *= g;
                 }
@@ -3224,10 +3242,20 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
             float pR = (1.f + panTrk) * 0.5f;
             busL += outS * pL;
             busR += outS * pR;
-            /* sends */
-            reverbBusL += outS * trackReverbSend[t];
-            delayBusL  += outS * trackDelaySend[t];
-            chorusBusL += outS * trackChorusSend[t];
+            /* sends (stereo) — only if master FX engaged */
+            float sndL = outS * pL, sndR = outS * pR;
+            if(revEng){
+                reverbBusL += sndL * trackReverbSend[t];
+                reverbBusR += sndR * trackReverbSend[t];
+            }
+            if(delEng){
+                delayBusL  += sndL * trackDelaySend[t];
+                delayBusR  += sndR * trackDelaySend[t];
+            }
+            if(choEng){
+                chorusBusL += sndL * trackChorusSend[t];
+                chorusBusR += sndR * trackChorusSend[t];
+            }
             /* peak */
             float pk = fabsf(outS);
             if(pk > trackPeak[t]) trackPeak[t] = pk;
@@ -3287,8 +3315,8 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
             if(gFilterType == FTYPE_RESONANT){
                 L = gFilter2L.Process(L);
                 R = gFilter2R.Process(R);
-                L = tanhf(L * 1.4f) * 0.714f;
-                R = tanhf(R * 1.4f) * 0.714f;
+                L = SoftLimit(L * 1.4f) * 0.714f;
+                R = SoftLimit(R * 1.4f) * 0.714f;
             }
         }
 
@@ -3313,10 +3341,11 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
             }
         }
 
-        /* ── Delay (with send bus input) ── */
+        /* ── Delay (with send bus input — mono delay line) ── */
         if(IsDelayEngaged()){
             float wet = masterDelay.Read();
-            masterDelay.Write(L + delayBusL + wet * delayFeedback);
+            float delaySendMono = (delayBusL + delayBusR) * 0.5f;
+            masterDelay.Write(L + delaySendMono + wet * delayFeedback);
             L = L * (1.0f - delayMix) + wet * delayMix;
             R = R * (1.0f - delayMix) + wet * delayMix;
         }
@@ -3324,7 +3353,7 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
         /* ── Compressor ── */
         if(IsCompEngaged()){
             L = masterComp.Process(L);
-            R = masterComp.Process(R);
+            R = masterComp.Apply(R);   /* same gain as L → true stereo link */
         }
 
         /* ── Wavefolder ── */
@@ -3363,9 +3392,10 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
             L *= t; R *= t;
         }
 
-        /* ── Chorus (with send bus input) ── */
+        /* ── Chorus (with send bus input — mono chorus engine) ── */
         if(IsChorusEngaged()){
-            float wet = masterChorus.Process(L + chorusBusL);
+            float chorusSendMono = (chorusBusL + chorusBusR) * 0.5f;
+            float wet = masterChorus.Process(L + chorusSendMono);
             L = L * (1.0f - chorusMix) + wet * chorusMix;
             R = R * (1.0f - chorusMix) + wet * chorusMix;
         }
@@ -3373,7 +3403,7 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
         /* ── Reverb (with send bus input) ── */
         float revL = 0, revR = 0;
         if(IsReverbEngaged()){
-            masterReverb.Process(L + reverbBusL, R + reverbBusL,
+            masterReverb.Process(L + reverbBusL, R + reverbBusR,
                                 &revL, &revR);
             L = L * (1.0f - reverbMix) + revL * reverbMix;
             R = R * (1.0f - reverbMix) + revR * reverbMix;
@@ -3925,6 +3955,7 @@ static void ProcessCommand()
             if(thresh <= 0.f) thresh = powf(10.f, clampF(thresh, -60.f, 0.f) / 20.f);
             trkCompThresh[t] = clampF(thresh, 0.01f, 1.f);
             trkCompRatio[t]  = clampF(ratio, 1.f, 20.f);
+            trkCompExp[t]    = 1.f - 1.f/trkCompRatio[t];
         }
         break;
     case CMD_TRACK_CLEAR_LIVE:
@@ -5672,6 +5703,7 @@ static void InitArrays()
         trkCompActive[i] = false;
         trkCompThresh[i] = 0.6f;
         trkCompRatio[i]  = 4.0f;
+        trkCompExp[i]    = 1.f - 1.f/4.0f;
         trkCompEnv[i]    = 0;
         trkEqLowDb[i]  = 0;
         trkEqMidDb[i]  = 0;
