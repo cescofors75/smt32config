@@ -220,6 +220,9 @@ static DMA_HandleTypeDef  hdma_spi1_tx;
 #define SYNTH_ENGINE_WTOSC 4
 #define SYNTH_ENGINE_SH101 5  /* I1: Roland SH-101 monosynth */
 #define SYNTH_ENGINE_FM2OP 6  /* I2: 2-operator FM */
+#define SYNTH_ENGINE_PHYS  7  /* Physical modeling: ModalVoice/StringVoice */
+#define SYNTH_ENGINE_NOISE 8  /* Noise/texture: Particle percussion */
+#define SYNTH_ENGINE_COUNT 9
 
 enum MasterFxRouteId : uint8_t {
     MASTER_FX_ROUTE_FILTER = 0,
@@ -232,7 +235,33 @@ enum MasterFxRouteId : uint8_t {
     MASTER_FX_ROUTE_TREMOLO,
     MASTER_FX_ROUTE_WAVEFOLDER,
     MASTER_FX_ROUTE_LIMITER,
+    MASTER_FX_ROUTE_AUTOWAH,
+    MASTER_FX_ROUTE_EARLY_REF,
 };
+
+/* New Master FX (mega upgrade) */
+#define CMD_PITCHSHIFT_ACTIVE  0x27  /* reuse: [1=pitchshift] overloaded with subId */
+#define CMD_AUTOWAH_ACTIVE     0xA5
+#define CMD_AUTOWAH_LEVEL      0xA6
+#define CMD_AUTOWAH_MIX        0xA7
+#define CMD_STEREO_WIDTH       0xA8  /* [width 0-200] 100=normal */
+#define CMD_TAPE_STOP          0xA9  /* [0=off, 1=stop, 2=start] */
+#define CMD_BEAT_REPEAT        0xAA  /* [0=off, div=1/2/4/8/16/32] */
+#define CMD_DELAY_STEREO       0xAB  /* [0=mono, 1=pingpong] */
+#define CMD_CHORUS_STEREO      0xAC  /* [0=mono, 1=stereo] — now default stereo */
+#define CMD_EARLY_REF_ACTIVE   0xAD  /* [0=off, 1=on] early reflections */
+#define CMD_EARLY_REF_MIX      0xAE  /* [mix 0-100] */
+
+/* Choke Groups */
+#define CMD_CHOKE_GROUP        0xAF  /* [pad(1), group(1)] 0=none 1-8=group */
+
+/* Song Mode */
+#define CMD_SONG_UPLOAD        0xF2  /* [count(1), entries×{pattern(1), repeats(1)}] */
+#define CMD_SONG_CONTROL       0xF3  /* [0=stop, 1=play, 2=reset] */
+#define CMD_SONG_GET_POS       0xF4  /* → [songIdx(1), pattern(1), repeat(1), rsvd(1)] */
+
+/* Expanded per-track LFO targets */
+#define CMD_TRACK_LFO_CONFIG   0x67  /* [track, wave, target, rateHi, rateLo, depthHi, depthLo] */
 
 /* Bulk */
 #define CMD_BULK_TRIGGERS     0xF0
@@ -263,6 +292,11 @@ enum MasterFxRouteId : uint8_t {
 #define FTYPE_LOWSHELF   7
 #define FTYPE_HIGHSHELF  8
 #define FTYPE_RESONANT   9   /* 4-pole LP: 2 biquads cascaded, Q up to 40, soft saturation */
+#define FTYPE_LADDER    10   /* Moog Ladder 24dB/oct via DaisySP Ladder */
+#define FTYPE_SVF_LP    11   /* State Variable Filter LP with drive */
+#define FTYPE_SVF_HP    12   /* State Variable Filter HP */
+#define FTYPE_SVF_BP    13   /* State Variable Filter BP */
+#define FTYPE_COMB      14   /* Comb filter resonator */
 
 /* Distortion modes */
 #define DMODE_SOFT  0
@@ -672,6 +706,81 @@ static bool  waveFolderRouted = true;
 static bool  limiterActive  = false;
 static bool  limiterRouted  = true;
 
+/* Autowah (DaisySP) */
+static Autowah    masterAutowah;
+static bool  autowahActive  = false;
+static bool  autowahRouted  = true;
+static float autowahLevel   = 0.5f;
+static float autowahMix     = 0.5f;
+
+/* Stereo Width (Mid-Side) — 100 = normal, 0 = mono, 200 = super wide */
+static float stereoWidth    = 1.0f;  /* 0..2 mapped from 0..200% */
+
+/* Tape Stop effect — global pitch ramp to 0 */
+static bool  tapeStopActive = false;
+static float tapeStopSpeed  = 1.0f;  /* current speed multiplier (1→0 on stop) */
+static float tapeStopRate   = 0.0001f; /* ramp-down rate per sample */
+
+/* Beat Repeat — circular buffer of master output */
+#define BEAT_REPEAT_BUF_SIZE 96000  /* 2 seconds @ 48kHz */
+DSY_SDRAM_BSS static float beatRepBufL[BEAT_REPEAT_BUF_SIZE];
+DSY_SDRAM_BSS static float beatRepBufR[BEAT_REPEAT_BUF_SIZE];
+static bool     beatRepActive = false;
+static uint8_t  beatRepDiv    = 0;   /* 0=off, 2=1/2, 4=1/4, 8=1/8, 16=1/16, 32=1/32 */
+static uint32_t beatRepLen    = 0;   /* samples per slice */
+static uint32_t beatRepWp     = 0;
+static uint32_t beatRepRp     = 0;
+static bool     beatRepPlaying = false;
+
+/* Ping-Pong Delay — second delay line for stereo */
+static DelayLine<float, MAX_DELAY_SAMPLES> DSY_SDRAM_BSS masterDelayR;
+static bool  delayPingPong  = false;
+
+/* Stereo Chorus mode */
+static bool  chorusStereoMode = true;  /* default: stereo for wider mix */
+
+/* Early Reflections (4 taps before ReverbSc) */
+#define ER_TAPS 6
+static DelayLine<float, 4800> DSY_SDRAM_BSS erDelayL;  /* 100ms max */
+static DelayLine<float, 4800> DSY_SDRAM_BSS erDelayR;
+static bool  erActive  = false;
+static bool  erRouted  = true;
+static float erMix     = 0.15f;
+static const float erTapTimesL[ER_TAPS] = { 7.f, 13.f, 19.f, 29.f, 41.f, 53.f };  /* ms */
+static const float erTapTimesR[ER_TAPS] = { 11.f, 17.f, 23.f, 37.f, 47.f, 59.f }; /* ms */
+static const float erTapGains[ER_TAPS]  = { 0.8f, 0.65f, 0.5f, 0.4f, 0.3f, 0.22f };
+
+/* Choke Groups — pad → group (0 = none, 1-8 = group) */
+static uint8_t chokeGroup[MAX_PADS];
+
+/* Song Mode — chain of pattern+repeats */
+#define SONG_MAX_ENTRIES 32
+struct SongEntry { uint8_t pattern; uint8_t repeats; };
+static SongEntry songChain[SONG_MAX_ENTRIES];
+static uint8_t songLength    = 0;
+static bool    songPlaying   = false;
+static uint8_t songIdx       = 0;
+static uint8_t songRepeatCnt = 0;
+
+/* Expanded LFO targets */
+enum TrackLfoTargetEx : uint8_t {
+    LFO_TGT_GAIN_EX   = 0,
+    LFO_TGT_PAN_EX    = 1,
+    LFO_TGT_FILTER_EX = 2,
+    LFO_TGT_PITCH     = 3,
+    LFO_TGT_ECHO_TIME = 4,
+    LFO_TGT_DIST_DRIVE= 5,
+    LFO_TGT_CRUSH     = 6,
+    LFO_TGT_SEND_REV  = 7,
+    LFO_TGT_SEND_DEL  = 8,
+};
+
+/* DaisySP Ladder filter for master (used when gFilterType == FTYPE_LADDER) */
+static LadderFilter  masterLadderL, masterLadderR;
+
+/* DaisySP SVF filter for master (used when gFilterType == FTYPE_SVF_*) */
+static Svf     masterSvfL, masterSvfR;
+
 /* ═══════════════════════════════════════════════════════════════════
  *  12. GLOBAL FILTER STATE
  * ═══════════════════════════════════════════════════════════════════ */
@@ -702,6 +811,8 @@ static bool* GetMasterFxRouteFlag(uint8_t fxId)
         case MASTER_FX_ROUTE_TREMOLO:    return &tremoloRouted;
         case MASTER_FX_ROUTE_WAVEFOLDER: return &waveFolderRouted;
         case MASTER_FX_ROUTE_LIMITER:    return &limiterRouted;
+        case MASTER_FX_ROUTE_AUTOWAH:    return &autowahRouted;
+        case MASTER_FX_ROUTE_EARLY_REF:  return &erRouted;
         default:                         return nullptr;
     }
 }
@@ -724,6 +835,8 @@ static inline bool IsChorusEngaged()     { return chorusRouted && chorusActive &
 static inline bool IsTremoloEngaged()    { return tremoloRouted && tremoloActive; }
 static inline bool IsWaveFolderEngaged() { return waveFolderRouted && waveFolderGain > 1.01f; }
 static inline bool IsLimiterEngaged()    { return limiterRouted && limiterActive; }
+static inline bool IsAutowahEngaged()    { return autowahRouted && autowahActive; }
+static inline bool IsEarlyRefEngaged()   { return erRouted && erActive && erMix > 0.0001f; }
 
 /* ═══════════════════════════════════════════════════════════════════
  *  13. PER-PAD STATE
@@ -1157,6 +1270,20 @@ static TB303::Synth acid303;
 static WavetableOsc wtOsc;
 static SH101::Synth synthSH101;  /* I1: Roland SH-101 */
 static FM2Op::Synth synthFM2Op;  /* I2: FM 2-op Yamaha */
+
+/* Physical Modeling engine — DaisySP ModalVoice + StringVoice */
+static ModalVoice  physModal;
+static StringVoice physString;
+static float physModalGain  = 0.8f;
+static float physStringGain = 0.8f;
+static bool  physModalActive = false;
+static bool  physStringActive = false;
+
+/* Noise/Texture engine — DaisySP Particle */
+static Particle noisePart;
+static float noisePartGain  = 0.6f;
+static bool  noisePartActive = false;
+
 static uint8_t trackWtNote[16];   /* nota MIDI por track WT, default C4=60 */
 static uint8_t trackSH101Note[16]; /* nota MIDI por track SH101            */
 static uint8_t trackFM2OpNote[16]; /* nota MIDI por track FM2Op            */
@@ -1166,13 +1293,18 @@ static float wtLfoRateState      = 2.0f;
 static float wtLfoDepthState     = 0.0f;
 static WtLfoTarget wtLfoTargetState = WT_LFO_WAVE;
 
+/* Forward-declare sanitizeF (defined in DSP HELPERS section) */
+static inline float sanitizeF(float v);
+
 /* M3: DC Offset Removal — HP 1-polo a ~20 Hz en salida estereo */
 struct SimpleDcBlock {
     float x1 = 0.0f, y1 = 0.0f;
     float a  = 0.9997f; /* 1 - 2*pi*20 / 48000 */
     void Init(float sr) { a = 1.0f - (6.283185f * 20.0f / sr); }
     float Process(float x) {
+        x = sanitizeF(x);
         float y = x - x1 + a * y1;
+        y = sanitizeF(y);
         x1 = x; y1 = y;
         return y;
     }
@@ -1263,8 +1395,8 @@ static inline void Synth808TriggerByPad(uint8_t padIdx, float velocity)
         synth808.Trigger(TR808::INST_KICK, velocity); /* fallback */
 }
 
-/* Bitmask: qué engines están activos (bit0=808, bit1=909, bit2=505, bit3=303, bit4=WTOSC) */
-static uint8_t synthActiveMask = 0x7F;  /* 808+909+505+303+WTOSC+SH101+FM2Op activos */
+/* Bitmask: qué engines están activos */
+static uint16_t synthActiveMask = 0x01FF;  /* all 9 engines active */
 
 /* ── Demo Mode ── */
 static Demo::DemoSequencer demoSeq;
@@ -1366,6 +1498,17 @@ static inline float clampF(float v, float lo, float hi){
     return v < lo ? lo : (v > hi ? hi : v);
 }
 
+/* Kill NaN, Inf and denormals — returns 0 for any bad float */
+static inline float sanitizeF(float v){
+    /* A finite float that is also not a denormal */
+    if(v != v) return 0.0f;                         /* NaN  */
+    if(v > 1e15f || v < -1e15f) return 0.0f;        /* ±Inf / huge */
+    /* Flush denormals to zero (they slow down ARM FPU) */
+    union { float f; uint32_t u; } u; u.f = v;
+    if((u.u & 0x7F800000u) == 0 && (u.u & 0x007FFFFFu) != 0) return 0.0f;
+    return v;
+}
+
 static inline float VolumeByteToGain(uint8_t volumePct)
 {
     return clampF((float)volumePct, 0.0f, 150.0f) / 100.0f;
@@ -1399,6 +1542,8 @@ static void ResetMasterProcessingState()
     flangerActive = false;
     waveFolderGain = 1.0f;
     limiterActive = false;
+    autowahActive = false;
+    erActive = false;
 
     delayRouted = true;
     reverbRouted = true;
@@ -1409,6 +1554,8 @@ static void ResetMasterProcessingState()
     flangerRouted = true;
     waveFolderRouted = true;
     limiterRouted = true;
+    autowahRouted = true;
+    erRouted = true;
 
     gFilterRouted = true;
     gFilterType = FTYPE_NONE;
@@ -1421,6 +1568,16 @@ static void ResetMasterProcessingState()
     gSrHoldL = 0.0f;
     gSrHoldR = 0.0f;
     gSrCounter = 0;
+
+    /* Mega upgrade state */
+    stereoWidth = 1.0f;
+    tapeStopActive = false;
+    tapeStopSpeed = 1.0f;
+    beatRepActive = false;
+    beatRepDiv = 0;
+    beatRepPlaying = false;
+    delayPingPong = false;
+    chorusStereoMode = true;
 }
 
 static inline float TriFromPhase(float ph)
@@ -1995,6 +2152,13 @@ static void ReleaseTrackEngine(uint8_t track, int8_t engine)
         case SYNTH_ENGINE_FM2OP:
             synthFM2Op.NoteOff();
             break;
+        case SYNTH_ENGINE_PHYS:
+            physModalActive = false;
+            physStringActive = false;
+            break;
+        case SYNTH_ENGINE_NOISE:
+            noisePartActive = false;
+            break;
         default:
             break;
     }
@@ -2006,6 +2170,9 @@ static void ReleaseAllSynthEngines()
     wtOsc.AllNotesOff();
     synthSH101.NoteOff();
     synthFM2Op.NoteOff();
+    physModalActive = false;
+    physStringActive = false;
+    noisePartActive = false;
 }
 
 static void ApplyWtModState()
@@ -2604,6 +2771,19 @@ static void TriggerPad(uint8_t pad, uint8_t velocity,
 {
     if(pad >= MAX_PADS || !sampleLoaded[pad] || padLoading[pad]) return;
 
+    /* ── Choke group: silence any other pad in the same group ── */
+    uint8_t grp = chokeGroup[pad];
+    if(grp > 0){
+        for(int cp = 0; cp < MAX_PADS; cp++){
+            if(cp == pad) continue;
+            if(chokeGroup[cp] == grp){
+                for(int v = 0; v < MAX_VOICES; v++)
+                    if(voices[v].active && voices[v].pad == (uint8_t)cp)
+                        voices[v].active = false;
+            }
+        }
+    }
+
     /* Find free slot or steal oldest */
     int slot = -1;
     for(int i = 0; i < MAX_VOICES; i++)
@@ -2743,7 +2923,7 @@ static void DsqFireStep() {
         if(!s.active || s.velocity == 0) continue;
 
         int8_t  eng     = dsqTrackEngine[t];
-        bool    isSynth = (eng >= 0 && eng <= SYNTH_ENGINE_FM2OP);
+        bool    isSynth = (eng >= 0 && eng < SYNTH_ENGINE_COUNT);
 
         /* Tracks de sampler: verificar que hay muestra cargada y no en recarga */
         if(!isSynth && (!sampleLoaded[t] || padLoading[t])) continue;
@@ -2810,6 +2990,23 @@ static void DsqFireStep() {
                     synthFM2Op.NoteOn(note, vel);
                     break;
                 }
+                case SYNTH_ENGINE_PHYS: {
+                    float freq = 440.f * powf(2.f, ((t < 16 ? trackWtNote[t] : 60) - 69) / 12.f);
+                    physModal.SetFreq(freq);
+                    physString.SetFreq(freq);
+                    physModal.SetAccent(vel);
+                    physString.SetAccent(vel);
+                    physModalActive = true;
+                    physStringActive = true;
+                    break;
+                }
+                case SYNTH_ENGINE_NOISE: {
+                    float freq = 440.f * powf(2.f, ((t < 16 ? trackWtNote[t] : 60) - 69) / 12.f);
+                    noisePart.SetFreq(freq);
+                    noisePart.SetDensity(0.5f + vel * 0.5f);
+                    noisePartActive = true;
+                    break;
+                }
             }
         }
     }
@@ -2825,6 +3022,11 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
                    AudioHandle::OutputBuffer out,
                    size_t                    size)
 {
+    /* Enforce FZ+DN in ISR context (belt-and-suspenders for FPDSCR) */
+    __asm volatile("VMRS r0, FPSCR\n"
+                   "ORR  r0, r0, #(1<<24)|(1<<25)\n"
+                   "VMSR FPSCR, r0" ::: "r0");
+
     /* ── STARTUP TONE TEST: tono 1kHz directo, bypasea toda la cadena ── */
     if(kStartupToneTest){
         static uint32_t toneSamples = 0;
@@ -2854,13 +3056,12 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
 
     float mixPeak = 0.0f;
 
-    /* ═ Pre-calcular: primer track que usa cada motor de síntesis (índice 0–4) ═ */
-    /* Solo cambia cuando el usuario reasigna engines — una vez por bloque es                  */
-    /* extremadamente barato (16 comparaciones de int8).                                       */
-    int8_t engTrk[7] = { -1, -1, -1, -1, -1, -1, -1 };
+    /* ═ Pre-calcular: primer track que usa cada motor de síntesis ═ */
+    int8_t engTrk[SYNTH_ENGINE_COUNT];
+    for(int _ei = 0; _ei < SYNTH_ENGINE_COUNT; _ei++) engTrk[_ei] = -1;
     for(int _t = 0; _t < DSQ_TRACKS; _t++){
         int8_t _e = dsqTrackEngine[_t];
-        if(_e >= 0 && _e < 7 && engTrk[_e] < 0)
+        if(_e >= 0 && _e < SYNTH_ENGINE_COUNT && engTrk[_e] < 0)
             engTrk[_e] = (int8_t)_t;
     }
 
@@ -2877,6 +3078,19 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
             if(dseq.samplesElapsed == 0){
                 dseq.currentStep = (dseq.currentStep + 1) % (int16_t)dseq.patternLength;
                 DsqFireStep();
+                /* ── Song mode: advance chain when pattern cycle restarts ── */
+                if(songPlaying && dseq.currentStep == 0 && songLength > 0){
+                    songRepeatCnt++;
+                    if(songRepeatCnt >= songChain[songIdx].repeats){
+                        songRepeatCnt = 0;
+                        songIdx++;
+                        if(songIdx >= songLength){
+                            songPlaying = false;   /* chain finished */
+                        } else {
+                            dseq.currentPattern = songChain[songIdx].pattern;
+                        }
+                    }
+                }
             }
             dseq.samplesElapsed++;
             /* Swing: odd steps delayed */
@@ -3015,11 +3229,15 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
                     padTurnCounter[p] = 0;
                 }
             }
+            /* ── LFO → Pitch (modulate playback speed) ── */
+            if(trkLfoActive[p] && trkLfoTarget[p] == LFO_TGT_PITCH)
+                adv *= clampF(1.0f + 0.5f * lfoVal[p], 0.25f, 4.0f);
+
             vx.pos += padReverse[p] ? -adv : adv;
 
             /* ── Pad filter ── */
             if(padFilterType[p]){
-                s = padFilter[p].Process(s);
+                s = sanitizeF(padFilter[p].Process(s));
             }
 
             /* ── Pad distortion + crush ── */
@@ -3029,7 +3247,7 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
             /* ── Scratch FX ── */
             if(padScratchOn[p]){
                 padScratchFilter[p].SetType(FTYPE_LOWPASS, padScratchCut[p], 0.707f, (float)SAMPLE_RATE);
-                s = padScratchFilter[p].Process(s);
+                s = sanitizeF(padScratchFilter[p].Process(s));
                 if(padScratchCrackle[p] > 0.01f && (FastRand() & 0xFF) < (uint32_t)(padScratchCrackle[p]*64.f))
                     s += RandFloat() * 0.05f;
             }
@@ -3049,25 +3267,37 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
                         trkFilter2[p].SetType(FTYPE_RESONANT, modCut, trkFilterQ[p], (float)SAMPLE_RATE);
                     trkFilterLfoSet[p] = 1;
                 }
-                s = trkFilter[p].Process(s);
+                s = sanitizeF(trkFilter[p].Process(s));
                 if(trkFilterType[p] == FTYPE_RESONANT){
-                    s = trkFilter2[p].Process(s);           /* 2nd pole pair → 24dB/oct */
-                    s = SoftLimit(s * 1.4f) * 0.714f;      /* soft saturation analógica */
+                    s = sanitizeF(trkFilter2[p].Process(s));
+                    s = SoftLimit(s * 1.4f) * 0.714f;
                 }
             }
 
             /* ── Per-track dist + crush ── */
-            s = ApplyDist(s, trkDistDrive[p], trkDistMode[p]);
-            s = BitCrush(s, trkBitDepth[p]);
+            {
+                float drv = trkDistDrive[p];
+                if(trkLfoActive[p] && trkLfoTarget[p] == LFO_TGT_DIST_DRIVE)
+                    drv = clampF(drv * (1.0f + 0.8f * lfoVal[p]), 0.0f, 64.0f);
+                s = ApplyDist(s, drv, trkDistMode[p]);
+
+                float bd = trkBitDepth[p];
+                if(trkLfoActive[p] && trkLfoTarget[p] == LFO_TGT_CRUSH)
+                    bd = clampF(bd - 6.0f * lfoVal[p], 2.0f, 16.0f);
+                s = BitCrush(s, bd);
+            }
 
             /* ── Per-track EQ (3-band) ── */
-            if(trkEqLowDb[p])  s = trkEqLow[p].Process(s);
-            if(trkEqMidDb[p])  s = trkEqMid[p].Process(s);
-            if(trkEqHighDb[p]) s = trkEqHigh[p].Process(s);
+            if(trkEqLowDb[p])  s = sanitizeF(trkEqLow[p].Process(s));
+            if(trkEqMidDb[p])  s = sanitizeF(trkEqMid[p].Process(s));
+            if(trkEqHighDb[p]) s = sanitizeF(trkEqHigh[p].Process(s));
 
             /* ── Per-track echo ── */
             if(trkEchoActive[p]){
-                uint32_t d = (uint32_t)trkEchoDelay[p];
+                float rawDelay = trkEchoDelay[p];
+                if(trkLfoActive[p] && trkLfoTarget[p] == LFO_TGT_ECHO_TIME)
+                    rawDelay = clampF(rawDelay * (1.0f + 0.4f * lfoVal[p]), 1.f, (float)(TRACK_ECHO_SIZE-1));
+                uint32_t d = (uint32_t)rawDelay;
                 if(d==0) d=1; if(d>=TRACK_ECHO_SIZE) d=TRACK_ECHO_SIZE-1;
                 uint32_t rp = (trkEchoWp[p] + TRACK_ECHO_SIZE - d) % TRACK_ECHO_SIZE;
                 float delayed = trkEchoBuf[p][rp];
@@ -3139,12 +3369,18 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
 
             /* ── Send buses (stereo) — only accumulate if master FX engaged ── */
             if(revEng){
-                reverbBusL += outL * trackReverbSend[p];
-                reverbBusR += outR * trackReverbSend[p];
+                float rSend = trackReverbSend[p];
+                if(trkLfoActive[p] && trkLfoTarget[p] == LFO_TGT_SEND_REV)
+                    rSend = clampF(rSend + 0.5f * lfoVal[p], 0.0f, 1.0f);
+                reverbBusL += outL * rSend;
+                reverbBusR += outR * rSend;
             }
             if(delEng){
-                delayBusL  += outL * trackDelaySend[p];
-                delayBusR  += outR * trackDelaySend[p];
+                float dSend = trackDelaySend[p];
+                if(trkLfoActive[p] && trkLfoTarget[p] == LFO_TGT_SEND_DEL)
+                    dSend = clampF(dSend + 0.5f * lfoVal[p], 0.0f, 1.0f);
+                delayBusL  += outL * dSend;
+                delayBusR  += outR * dSend;
             }
             if(choEng){
                 chorusBusL += outL * trackChorusSend[p];
@@ -3175,9 +3411,9 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
             if(trkFxRouted[t]){
             /* filtro */
             if(trkFilterType[t]){
-                s = trkFilter[t].Process(s);
+                s = sanitizeF(trkFilter[t].Process(s));
                 if(trkFilterType[t] == FTYPE_RESONANT){
-                    s = trkFilter2[t].Process(s);
+                    s = sanitizeF(trkFilter2[t].Process(s));
                     s = SoftLimit(s * 1.4f) * 0.714f;
                 }
             }
@@ -3185,9 +3421,9 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
             s = ApplyDist(s, trkDistDrive[t], trkDistMode[t]);
             s = BitCrush(s, trkBitDepth[t]);
             /* EQ 3 bandas */
-            if(trkEqLowDb[t])  s = trkEqLow[t].Process(s);
-            if(trkEqMidDb[t])  s = trkEqMid[t].Process(s);
-            if(trkEqHighDb[t]) s = trkEqHigh[t].Process(s);
+            if(trkEqLowDb[t])  s = sanitizeF(trkEqLow[t].Process(s));
+            if(trkEqMidDb[t])  s = sanitizeF(trkEqMid[t].Process(s));
+            if(trkEqHighDb[t]) s = sanitizeF(trkEqHigh[t].Process(s));
             /* echo */
             if(trkEchoActive[t]){
                 uint32_t d = (uint32_t)trkEchoDelay[t];
@@ -3263,32 +3499,45 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
 
         /* demoFadeGain ya calculado arriba por el bloque DEMO MODE */
         if (synthActiveMask & (1 << SYNTH_ENGINE_808)){
-            float s = synth808.Process() * demoFadeGain;
+            float s = sanitizeF(synth808.Process()) * demoFadeGain;
             synthTobus(s, engTrk[SYNTH_ENGINE_808]);
         }
         if (synthActiveMask & (1 << SYNTH_ENGINE_909)){
-            float s = synth909.Process() * demoFadeGain;
+            float s = sanitizeF(synth909.Process()) * demoFadeGain;
             synthTobus(s, engTrk[SYNTH_ENGINE_909]);
         }
         if (kEnableSynth505 && (synthActiveMask & (1 << SYNTH_ENGINE_505))){
-            float s = synth505.Process() * demoFadeGain;
+            float s = sanitizeF(synth505.Process()) * demoFadeGain;
             synthTobus(s, engTrk[SYNTH_ENGINE_505]);
         }
         if (synthActiveMask & (1 << SYNTH_ENGINE_303)){
-            float s = acid303.Process() * demoFadeGain;
+            float s = sanitizeF(acid303.Process()) * demoFadeGain;
             synthTobus(s, engTrk[SYNTH_ENGINE_303]);
         }
         if (synthActiveMask & (1 << SYNTH_ENGINE_WTOSC)){
-            float s = wtOsc.Process() * demoFadeGain;
+            float s = sanitizeF(wtOsc.Process()) * demoFadeGain;
             synthTobus(s, engTrk[SYNTH_ENGINE_WTOSC]);
         }
         if (synthActiveMask & (1 << SYNTH_ENGINE_SH101)){  /* I1 */
-            float s = synthSH101.Process() * demoFadeGain;
+            float s = sanitizeF(synthSH101.Process()) * demoFadeGain;
             synthTobus(s, engTrk[SYNTH_ENGINE_SH101]);
         }
         if (synthActiveMask & (1 << SYNTH_ENGINE_FM2OP)){  /* I2 */
-            float s = synthFM2Op.Process() * demoFadeGain;
+            float s = sanitizeF(synthFM2Op.Process()) * demoFadeGain;
             synthTobus(s, engTrk[SYNTH_ENGINE_FM2OP]);
+        }
+        if (synthActiveMask & (1 << SYNTH_ENGINE_PHYS)){
+            float s = 0;
+            if(physModalActive)  s += sanitizeF(physModal.Process())  * physModalGain;
+            if(physStringActive) s += sanitizeF(physString.Process()) * physStringGain;
+            s *= demoFadeGain;
+            synthTobus(sanitizeF(s), engTrk[SYNTH_ENGINE_PHYS]);
+        }
+        if (synthActiveMask & (1 << SYNTH_ENGINE_NOISE)){
+            if(noisePartActive){
+                float s = sanitizeF(noisePart.Process()) * noisePartGain * demoFadeGain;
+                synthTobus(sanitizeF(s), engTrk[SYNTH_ENGINE_NOISE]);
+            }
         }
 
         /* ── Startup section cue (formante retro-robótico) ── */
@@ -3305,18 +3554,47 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
 
         /* ── MASTER FX CHAIN ── */
         float gainOut = kForceMasterGainDebug ? 1.0f : masterGain;
-        float L = busL * gainOut;
-        float R = busR * gainOut;
+        /* Sanitize bus accumulators to catch any NaN from voice/synth processing */
+        float L = sanitizeF(busL) * gainOut;
+        float R = sanitizeF(busR) * gainOut;
+        reverbBusL = sanitizeF(reverbBusL);
+        reverbBusR = sanitizeF(reverbBusR);
+        delayBusL  = sanitizeF(delayBusL);
+        delayBusR  = sanitizeF(delayBusR);
+        chorusBusL = sanitizeF(chorusBusL);
+        chorusBusR = sanitizeF(chorusBusR);
 
         /* ── Global filter ── */
         if(IsGlobalFilterEngaged()){
-            L = gFilterL.Process(L);
-            R = gFilterR.Process(R);
-            if(gFilterType == FTYPE_RESONANT){
-                L = gFilter2L.Process(L);
-                R = gFilter2R.Process(R);
-                L = SoftLimit(L * 1.4f) * 0.714f;
-                R = SoftLimit(R * 1.4f) * 0.714f;
+            /* Ladder / SVF / Comb filter handled by DaisySP modules */
+            if(gFilterType == FTYPE_LADDER){
+                L = sanitizeF(masterLadderL.Process(L));
+                R = sanitizeF(masterLadderR.Process(R));
+            } else if(gFilterType >= FTYPE_SVF_LP && gFilterType <= FTYPE_SVF_BP){
+                masterSvfL.Process(L);
+                masterSvfR.Process(R);
+                if(gFilterType == FTYPE_SVF_LP)      { L = sanitizeF(masterSvfL.Low());  R = sanitizeF(masterSvfR.Low()); }
+                else if(gFilterType == FTYPE_SVF_HP)  { L = sanitizeF(masterSvfL.High()); R = sanitizeF(masterSvfR.High()); }
+                else /* FTYPE_SVF_BP */               { L = sanitizeF(masterSvfL.Band()); R = sanitizeF(masterSvfR.Band()); }
+            } else if(gFilterType == FTYPE_COMB){
+                /* Comb filter via short delay line with feedback */
+                float combDelay = clampF(1.f / (gFilterCutoff > 20.f ? gFilterCutoff : 20.f) * (float)SAMPLE_RATE, 1.f, 4799.f);
+                float combFb = clampF(gFilterQ / 30.f, 0.f, 0.98f);
+                float combL = erDelayL.Read(combDelay);
+                float combR = erDelayR.Read(combDelay);
+                erDelayL.Write(clampF(L + combL * combFb, -4.f, 4.f));
+                erDelayR.Write(clampF(R + combR * combFb, -4.f, 4.f));
+                L = L * 0.5f + combL * 0.5f;
+                R = R * 0.5f + combR * 0.5f;
+            } else {
+                L = sanitizeF(gFilterL.Process(L));
+                R = sanitizeF(gFilterR.Process(R));
+                if(gFilterType == FTYPE_RESONANT){
+                    L = sanitizeF(gFilter2L.Process(L));
+                    R = sanitizeF(gFilter2R.Process(R));
+                    L = SoftLimit(L * 1.4f) * 0.714f;
+                    R = SoftLimit(R * 1.4f) * 0.714f;
+                }
             }
         }
 
@@ -3341,38 +3619,53 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
             }
         }
 
-        /* ── Delay (with send bus input — mono delay line) ── */
+        /* ── Autowah ── */
+        if(IsAutowahEngaged()){
+            float awL = sanitizeF(masterAutowah.Process(L));
+            L = L * (1.0f - autowahMix) + awL * autowahMix;
+            R = R * (1.0f - autowahMix) + awL * autowahMix;
+        }
+
+        /* ── Delay (mono or ping-pong stereo) ── */
         if(IsDelayEngaged()){
-            float wet = masterDelay.Read();
             float delaySendMono = (delayBusL + delayBusR) * 0.5f;
-            masterDelay.Write(L + delaySendMono + wet * delayFeedback);
-            L = L * (1.0f - delayMix) + wet * delayMix;
-            R = R * (1.0f - delayMix) + wet * delayMix;
+            if(delayPingPong){
+                float wetL = masterDelay.Read();
+                float wetR = masterDelayR.Read();
+                masterDelay.Write(clampF(L + delaySendMono + wetR * delayFeedback, -4.f, 4.f));
+                masterDelayR.Write(clampF(R + delaySendMono + wetL * delayFeedback, -4.f, 4.f));
+                L = L * (1.0f - delayMix) + wetL * delayMix;
+                R = R * (1.0f - delayMix) + wetR * delayMix;
+            } else {
+                float wet = masterDelay.Read();
+                masterDelay.Write(clampF(L + delaySendMono + wet * delayFeedback, -4.f, 4.f));
+                L = L * (1.0f - delayMix) + wet * delayMix;
+                R = R * (1.0f - delayMix) + wet * delayMix;
+            }
         }
 
         /* ── Compressor ── */
         if(IsCompEngaged()){
-            L = masterComp.Process(L);
-            R = masterComp.Apply(R);   /* same gain as L → true stereo link */
+            L = sanitizeF(masterComp.Process(L));
+            R = sanitizeF(masterComp.Apply(R));
         }
 
         /* ── Wavefolder ── */
         if(IsWaveFolderEngaged()){
             masterFold.SetIncrement(waveFolderGain);
-            L = masterFold.Process(L);
-            R = masterFold.Process(R);
+            L = sanitizeF(masterFold.Process(L));
+            R = sanitizeF(masterFold.Process(R));
         }
 
         /* ── Phaser ── */
         if(IsPhaserEngaged()){
-            L = masterPhaser.Process(L);
-            /* Apply partially to R for stereo width */
+            L = sanitizeF(masterPhaser.Process(L));
             R = R * 0.7f + L * 0.3f;
         }
 
         /* ── Flanger (manual) ── */
         if(IsFlangerEngaged()){
-            flangerBuf[flangerWp] = L;
+            flangerBuf[flangerWp] = sanitizeF(L);
             float tri = flangerPhase < 0.5f ? flangerPhase*2.f : 2.f - flangerPhase*2.f;
             uint32_t tap = 4 + (uint32_t)(tri * flangerDepth * 200.f);
             if(tap >= 4096) tap = 4095;
@@ -3392,12 +3685,32 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
             L *= t; R *= t;
         }
 
-        /* ── Chorus (with send bus input — mono chorus engine) ── */
+        /* ── Chorus (mono or stereo, with send bus input) ── */
         if(IsChorusEngaged()){
             float chorusSendMono = (chorusBusL + chorusBusR) * 0.5f;
-            float wet = masterChorus.Process(L + chorusSendMono);
-            L = L * (1.0f - chorusMix) + wet * chorusMix;
-            R = R * (1.0f - chorusMix) + wet * chorusMix;
+            if(chorusStereoMode){
+                float wetL = sanitizeF(masterChorus.Process(L + chorusSendMono));
+                float wetR = sanitizeF(masterChorus.Process(R + chorusSendMono));
+                L = L * (1.0f - chorusMix) + wetL * chorusMix;
+                R = R * (1.0f - chorusMix) + wetR * chorusMix;
+            } else {
+                float wet = sanitizeF(masterChorus.Process(L + chorusSendMono));
+                L = L * (1.0f - chorusMix) + wet * chorusMix;
+                R = R * (1.0f - chorusMix) + wet * chorusMix;
+            }
+        }
+
+        /* ── Early Reflections (before reverb) ── */
+        if(IsEarlyRefEngaged()){
+            float erL = 0, erR = 0;
+            for(int t = 0; t < ER_TAPS; t++){
+                erL += erDelayL.Read(erTapTimesL[t] * 0.001f * (float)SAMPLE_RATE) * erTapGains[t];
+                erR += erDelayR.Read(erTapTimesR[t] * 0.001f * (float)SAMPLE_RATE) * erTapGains[t];
+            }
+            erDelayL.Write(sanitizeF(L));
+            erDelayR.Write(sanitizeF(R));
+            L = L * (1.0f - erMix) + sanitizeF(erL) * erMix;
+            R = R * (1.0f - erMix) + sanitizeF(erR) * erMix;
         }
 
         /* ── Reverb (with send bus input) ── */
@@ -3405,9 +3718,52 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
         if(IsReverbEngaged()){
             masterReverb.Process(L + reverbBusL, R + reverbBusR,
                                 &revL, &revR);
+            revL = sanitizeF(revL);
+            revR = sanitizeF(revR);
             L = L * (1.0f - reverbMix) + revL * reverbMix;
             R = R * (1.0f - reverbMix) + revR * reverbMix;
         }
+
+        /* ── Stereo Width (Mid-Side processing) ── */
+        if(stereoWidth < 0.99f || stereoWidth > 1.01f){
+            float mid  = (L + R) * 0.5f;
+            float side = (L - R) * 0.5f;
+            side *= stereoWidth;
+            L = mid + side;
+            R = mid - side;
+        }
+
+        /* ── Tape Stop effect ── */
+        if(tapeStopActive){
+            if(tapeStopSpeed > 0.01f){
+                tapeStopSpeed -= tapeStopRate;
+                if(tapeStopSpeed < 0.0f) tapeStopSpeed = 0.0f;
+            }
+            L *= tapeStopSpeed;
+            R *= tapeStopSpeed;
+        }
+
+        /* ── Beat Repeat ── */
+        if(beatRepActive && beatRepDiv > 0){
+            /* Always record into circular buffer */
+            beatRepBufL[beatRepWp] = L;
+            beatRepBufR[beatRepWp] = R;
+            beatRepWp = (beatRepWp + 1) % BEAT_REPEAT_BUF_SIZE;
+
+            if(beatRepPlaying && beatRepLen > 0){
+                L = beatRepBufL[beatRepRp];
+                R = beatRepBufR[beatRepRp];
+                beatRepRp = (beatRepRp + 1) % BEAT_REPEAT_BUF_SIZE;
+                /* Loop the slice */
+                if(beatRepRp >= beatRepWp ||
+                   ((beatRepWp > beatRepLen) && (beatRepRp >= (beatRepWp - beatRepLen))))
+                    beatRepRp = (beatRepWp >= beatRepLen) ? (beatRepWp - beatRepLen) : 0;
+            }
+        }
+
+        /* ── Sanitize before final output (kill NaN/Inf from any DSP module) ── */
+        L = sanitizeF(L);
+        R = sanitizeF(R);
 
         /* ── Limiter / Soft clip ── */
         if(IsLimiterEngaged()){
@@ -3496,7 +3852,7 @@ static void ProcessCommand()
             uint8_t vel = p[1];
             if(kAcceptOneBasedPadIndex && pad > 0) pad -= 1;
             int8_t livEng = (pad < DSQ_TRACKS) ? dsqTrackEngine[pad] : -1;
-            if(livEng >= 0 && livEng <= 6){
+            if(livEng >= 0 && livEng < SYNTH_ENGINE_COUNT){
                 /* Synth engine activo: disparar synth, NO sampler */
                 float fvel = clampF(vel / 127.0f, 0.0f, 1.0f);
                 switch(livEng){
@@ -3528,6 +3884,23 @@ static void ProcessCommand()
                     case SYNTH_ENGINE_FM2OP: {           /* I2 */
                         uint8_t note = (pad < 16) ? trackFM2OpNote[pad] : 60;
                         synthFM2Op.NoteOn(note, fvel);
+                        break;
+                    }
+                    case SYNTH_ENGINE_PHYS: {
+                        float freq = 440.f * powf(2.f, ((pad < 16 ? trackWtNote[pad] : 60) - 69) / 12.f);
+                        physModal.SetFreq(freq);
+                        physString.SetFreq(freq);
+                        physModal.SetAccent(fvel);
+                        physString.SetAccent(fvel);
+                        physModalActive = true;
+                        physStringActive = true;
+                        break;
+                    }
+                    case SYNTH_ENGINE_NOISE: {
+                        float freq = 440.f * powf(2.f, ((pad < 16 ? trackWtNote[pad] : 60) - 69) / 12.f);
+                        noisePart.SetFreq(freq);
+                        noisePart.SetDensity(0.5f + fvel * 0.5f);
+                        noisePartActive = true;
                         break;
                     }
                 }
@@ -3631,19 +4004,17 @@ static void ProcessCommand()
             memcpy(&gFilterSrReduce,p + 16, 4);
             gFilterCutoff = clampF(gFilterCutoff, 20.f, 20000.f);
             gFilterQ      = (gFilterType == FTYPE_RESONANT) ? clampF(gFilterQ, 0.3f, 40.f) : clampF(gFilterQ, 0.3f, 28.f);
-            gFilterL.SetType(gFilterType, gFilterCutoff, gFilterQ, (float)SAMPLE_RATE);
-            gFilterR.SetType(gFilterType, gFilterCutoff, gFilterQ, (float)SAMPLE_RATE);
-            if(gFilterType == FTYPE_RESONANT){
-                gFilter2L.SetType(FTYPE_RESONANT, gFilterCutoff, gFilterQ, (float)SAMPLE_RATE);
-                gFilter2R.SetType(FTYPE_RESONANT, gFilterCutoff, gFilterQ, (float)SAMPLE_RATE);
-            }
-        }
-        break;
-    case CMD_FILTER_CUTOFF:
-        if(len >= 4){
-            memcpy(&gFilterCutoff, p, 4);
-            gFilterCutoff = clampF(gFilterCutoff, 20.f, 20000.f);
-            if(gFilterType) {
+            if(gFilterType == FTYPE_LADDER){
+                masterLadderL.SetFreq(gFilterCutoff);
+                masterLadderR.SetFreq(gFilterCutoff);
+                masterLadderL.SetRes(clampF(gFilterQ / 28.f, 0.f, 1.f));
+                masterLadderR.SetRes(clampF(gFilterQ / 28.f, 0.f, 1.f));
+            } else if(gFilterType >= FTYPE_SVF_LP && gFilterType <= FTYPE_SVF_BP){
+                masterSvfL.SetFreq(gFilterCutoff);
+                masterSvfR.SetFreq(gFilterCutoff);
+                masterSvfL.SetRes(clampF(gFilterQ / 28.f, 0.f, 1.f));
+                masterSvfR.SetRes(clampF(gFilterQ / 28.f, 0.f, 1.f));
+            } else {
                 gFilterL.SetType(gFilterType, gFilterCutoff, gFilterQ, (float)SAMPLE_RATE);
                 gFilterR.SetType(gFilterType, gFilterCutoff, gFilterQ, (float)SAMPLE_RATE);
                 if(gFilterType == FTYPE_RESONANT){
@@ -3653,16 +4024,46 @@ static void ProcessCommand()
             }
         }
         break;
+    case CMD_FILTER_CUTOFF:
+        if(len >= 4){
+            memcpy(&gFilterCutoff, p, 4);
+            gFilterCutoff = clampF(gFilterCutoff, 20.f, 20000.f);
+            if(gFilterType){
+                if(gFilterType == FTYPE_LADDER){
+                    masterLadderL.SetFreq(gFilterCutoff);
+                    masterLadderR.SetFreq(gFilterCutoff);
+                } else if(gFilterType >= FTYPE_SVF_LP && gFilterType <= FTYPE_SVF_BP){
+                    masterSvfL.SetFreq(gFilterCutoff);
+                    masterSvfR.SetFreq(gFilterCutoff);
+                } else {
+                    gFilterL.SetType(gFilterType, gFilterCutoff, gFilterQ, (float)SAMPLE_RATE);
+                    gFilterR.SetType(gFilterType, gFilterCutoff, gFilterQ, (float)SAMPLE_RATE);
+                    if(gFilterType == FTYPE_RESONANT){
+                        gFilter2L.SetType(FTYPE_RESONANT, gFilterCutoff, gFilterQ, (float)SAMPLE_RATE);
+                        gFilter2R.SetType(FTYPE_RESONANT, gFilterCutoff, gFilterQ, (float)SAMPLE_RATE);
+                    }
+                }
+            }
+        }
+        break;
     case CMD_FILTER_RESONANCE:
         if(len >= 4){
             memcpy(&gFilterQ, p, 4);
             gFilterQ = (gFilterType == FTYPE_RESONANT) ? clampF(gFilterQ, 0.3f, 40.f) : clampF(gFilterQ, 0.3f, 28.f);
-            if(gFilterType) {
-                gFilterL.SetType(gFilterType, gFilterCutoff, gFilterQ, (float)SAMPLE_RATE);
-                gFilterR.SetType(gFilterType, gFilterCutoff, gFilterQ, (float)SAMPLE_RATE);
-                if(gFilterType == FTYPE_RESONANT){
-                    gFilter2L.SetType(FTYPE_RESONANT, gFilterCutoff, gFilterQ, (float)SAMPLE_RATE);
-                    gFilter2R.SetType(FTYPE_RESONANT, gFilterCutoff, gFilterQ, (float)SAMPLE_RATE);
+            if(gFilterType){
+                if(gFilterType == FTYPE_LADDER){
+                    masterLadderL.SetRes(clampF(gFilterQ / 28.f, 0.f, 1.f));
+                    masterLadderR.SetRes(clampF(gFilterQ / 28.f, 0.f, 1.f));
+                } else if(gFilterType >= FTYPE_SVF_LP && gFilterType <= FTYPE_SVF_BP){
+                    masterSvfL.SetRes(clampF(gFilterQ / 28.f, 0.f, 1.f));
+                    masterSvfR.SetRes(clampF(gFilterQ / 28.f, 0.f, 1.f));
+                } else {
+                    gFilterL.SetType(gFilterType, gFilterCutoff, gFilterQ, (float)SAMPLE_RATE);
+                    gFilterR.SetType(gFilterType, gFilterCutoff, gFilterQ, (float)SAMPLE_RATE);
+                    if(gFilterType == FTYPE_RESONANT){
+                        gFilter2L.SetType(FTYPE_RESONANT, gFilterCutoff, gFilterQ, (float)SAMPLE_RATE);
+                        gFilter2R.SetType(FTYPE_RESONANT, gFilterCutoff, gFilterQ, (float)SAMPLE_RATE);
+                    }
                 }
             }
         }
@@ -3790,7 +4191,7 @@ static void ProcessCommand()
     case CMD_REVERB_FEEDBACK:
         if(len >= 4){
             float v; memcpy(&v, p, 4);
-            reverbFeedback = clampF(v, 0.f, 0.99f);
+            reverbFeedback = clampF(v, 0.f, 0.95f);
             masterReverb.SetFeedback(reverbFeedback);
         } else if(len >= 1){
             reverbFeedback = p[0] / 100.0f;
@@ -4680,11 +5081,30 @@ static void ProcessCommand()
         wtOsc.Init((float)SAMPLE_RATE);
         synthSH101.Init((float)SAMPLE_RATE);
         synthFM2Op.Init((float)SAMPLE_RATE);
+        physModal.Init((float)SAMPLE_RATE);
+        physString.Init((float)SAMPLE_RATE);
+        noisePart.Init((float)SAMPLE_RATE);
+        physModalActive = false;
+        physStringActive = false;
+        noisePartActive = false;
         ApplyDefaultSynthPresets();
         for(int i=0;i<16;i++) trackWtNote[i]    = (uint8_t)(60 + (i % 12));
         for(int i=0;i<16;i++) trackSH101Note[i] = (uint8_t)(60 + (i % 12));
         for(int i=0;i<16;i++) trackFM2OpNote[i] = (uint8_t)(60 + (i % 12));
-        synthActiveMask = 0x7B;  /* 808+909+303+WTOSC+SH101+FM2Op (505 desactivado) */
+        /* Reset mega upgrade state */
+        masterAutowah.Init((float)SAMPLE_RATE);
+        masterLadderL.Init((float)SAMPLE_RATE);
+        masterLadderR.Init((float)SAMPLE_RATE);
+        masterSvfL.Init((float)SAMPLE_RATE);
+        masterSvfR.Init((float)SAMPLE_RATE);
+        erDelayL.Init();
+        erDelayR.Init();
+        masterDelayR.Init();
+        memset(beatRepBufL, 0, sizeof(beatRepBufL));
+        memset(beatRepBufR, 0, sizeof(beatRepBufR));
+        memset(chokeGroup, 0, sizeof(chokeGroup));
+        songLength = 0; songPlaying = false; songIdx = 0; songRepeatCnt = 0;
+        synthActiveMask = 0x01FF;  /* all 9 engines active */
         break;
 
     /* ════════════════════════════════════════════
@@ -4749,6 +5169,25 @@ static void ProcessCommand()
                     synthFM2Op.NoteOn(note, velocity);
                     break;
                 }
+                case SYNTH_ENGINE_PHYS: {
+                    uint8_t note = (instrument < 16) ? trackWtNote[instrument] : 60;
+                    float freq = 440.f * powf(2.f, (note - 69) / 12.f);
+                    physModal.SetFreq(freq);
+                    physString.SetFreq(freq);
+                    physModal.SetAccent(velocity);
+                    physString.SetAccent(velocity);
+                    physModalActive = true;
+                    physStringActive = true;
+                    break;
+                }
+                case SYNTH_ENGINE_NOISE: {
+                    uint8_t note = (instrument < 16) ? trackWtNote[instrument] : 60;
+                    float freq = 440.f * powf(2.f, (note - 69) / 12.f);
+                    noisePart.SetFreq(freq);
+                    noisePart.SetDensity(0.5f + velocity * 0.5f);
+                    noisePartActive = true;
+                    break;
+                }
             }
         }
         break;
@@ -4803,10 +5242,35 @@ static void ProcessCommand()
                         synthSH101.SetParam(paramId, val);
                     break;
                 case SYNTH_ENGINE_FM2OP:                  /* I2 */
-                    if(paramId == 20 && instrument < 16)  /* special: MIDI note assignment */
+                    if(paramId == 20 && instrument < 16)
                         trackFM2OpNote[instrument] = (uint8_t)clampF(val, 0.f, 127.f);
                     else
                         synthFM2Op.SetParam(paramId, val);
+                    break;
+                case SYNTH_ENGINE_PHYS:
+                    switch(paramId){
+                        case 0: physModal.SetFreq(clampF(val, 20.f, 10000.f));    break;
+                        case 1: physModal.SetStructure(clampF(val, 0.f, 1.f));    break;
+                        case 2: physModal.SetBrightness(clampF(val, 0.f, 1.f));   break;
+                        case 3: physModal.SetDamping(clampF(val, 0.f, 1.f));      break;
+                        case 4: physModalGain = clampF(val, 0.f, 1.f);            break;
+                        case 5: physString.SetFreq(clampF(val, 20.f, 10000.f));   break;
+                        case 6: physString.SetStructure(clampF(val, 0.f, 1.f));   break;
+                        case 7: physString.SetBrightness(clampF(val, 0.f, 1.f));  break;
+                        case 8: physString.SetDamping(clampF(val, 0.f, 1.f));     break;
+                        case 9: physStringGain = clampF(val, 0.f, 1.f);           break;
+                    }
+                    break;
+                case SYNTH_ENGINE_NOISE:
+                    switch(paramId){
+                        case 0: noisePart.SetFreq(clampF(val, 20.f, 10000.f));    break;
+                        case 1: noisePart.SetResonance(clampF(val, 0.f, 1.f));    break;
+                        case 2: noisePart.SetRandomFreq(clampF(val, 0.f, 1.f));   break;
+                        case 3: noisePart.SetDensity(clampF(val, 0.f, 1.f));      break;
+                        case 4: noisePart.SetGain(clampF(val, 0.f, 1.f));         break;
+                        case 5: noisePart.SetSpread(clampF(val, 0.f, 1.f));       break;
+                        case 6: noisePartGain = clampF(val, 0.f, 1.f);            break;
+                    }
                     break;
             }
         }
@@ -4853,8 +5317,12 @@ static void ProcessCommand()
     case CMD_SYNTH_ACTIVE:
         if(len >= 1)
         {
-            uint8_t oldMask = synthActiveMask;
-            synthActiveMask = p[0];
+            uint16_t oldMask = synthActiveMask;
+            /* Accept 1 or 2 bytes — backward compatible */
+            if(len >= 2)
+                synthActiveMask = (uint16_t)p[0] | ((uint16_t)p[1] << 8);
+            else
+                synthActiveMask = p[0];
             if((oldMask & (1 << SYNTH_ENGINE_303)) && !(synthActiveMask & (1 << SYNTH_ENGINE_303)))
                 acid303.NoteOff();
             if((oldMask & (1 << SYNTH_ENGINE_WTOSC)) && !(synthActiveMask & (1 << SYNTH_ENGINE_WTOSC)))
@@ -4863,6 +5331,12 @@ static void ProcessCommand()
                 synthSH101.NoteOff();
             if((oldMask & (1 << SYNTH_ENGINE_FM2OP)) && !(synthActiveMask & (1 << SYNTH_ENGINE_FM2OP)))
                 synthFM2Op.NoteOff();
+            if((oldMask & (1 << SYNTH_ENGINE_PHYS)) && !(synthActiveMask & (1 << SYNTH_ENGINE_PHYS))){
+                physModalActive = false;
+                physStringActive = false;
+            }
+            if((oldMask & (1 << SYNTH_ENGINE_NOISE)) && !(synthActiveMask & (1 << SYNTH_ENGINE_NOISE)))
+                noisePartActive = false;
         }
         break;
 
@@ -5054,6 +5528,157 @@ static void ProcessCommand()
         if(len >= 2){
             dseq.humanizeTimingMs = (p[0] > 20) ? 20 : p[0];
             dseq.humanizeVelAmt   = (p[1] > 50) ? 50 : p[1];
+        }
+        break;
+
+    /* ════════════════════════════════════════════
+     *  MEGA UPGRADE — NEW MASTER FX COMMANDS
+     * ════════════════════════════════════════════ */
+    case CMD_AUTOWAH_ACTIVE:
+        if(len >= 1) autowahActive = (bool)p[0];
+        break;
+    case CMD_AUTOWAH_LEVEL:
+        if(len >= 4){
+            float lvl; memcpy(&lvl, p, 4);
+            autowahLevel = clampF(lvl, 0.f, 1.f);
+            masterAutowah.SetLevel(autowahLevel);
+        }
+        break;
+    case CMD_AUTOWAH_MIX:
+        if(len >= 4){
+            float mix; memcpy(&mix, p, 4);
+            autowahMix = clampF(mix, 0.f, 1.f);
+        }
+        break;
+    case CMD_STEREO_WIDTH:
+        if(len >= 1){
+            /* p[0] = 0-200 where 100 = normal. Map to 0.0-2.0 */
+            stereoWidth = clampF((float)p[0] / 100.0f, 0.0f, 2.0f);
+        }
+        break;
+    case CMD_TAPE_STOP:
+        if(len >= 1){
+            if(p[0] == 1){
+                tapeStopActive = true;
+                tapeStopSpeed = 1.0f;
+                tapeStopRate = 0.00003f; /* ~0.7s ramp-down @48kHz */
+            } else if(p[0] == 2){
+                /* Tape start: ramp back up */
+                tapeStopActive = true;
+                tapeStopRate = -0.00005f; /* ramp up faster */
+            } else {
+                tapeStopActive = false;
+                tapeStopSpeed = 1.0f;
+            }
+        }
+        break;
+    case CMD_BEAT_REPEAT:
+        if(len >= 1){
+            beatRepDiv = p[0]; /* 0=off, 2/4/8/16/32 */
+            if(beatRepDiv == 0){
+                beatRepActive = false;
+                beatRepPlaying = false;
+            } else {
+                beatRepActive = true;
+                /* Calculate slice len from BPM and division */
+                float beatSec = 60.0f / (transportBpm > 1.f ? transportBpm : 120.f);
+                float sliceSec = beatSec * (4.0f / (float)beatRepDiv);
+                beatRepLen = (uint32_t)(sliceSec * (float)SAMPLE_RATE);
+                if(beatRepLen > BEAT_REPEAT_BUF_SIZE) beatRepLen = BEAT_REPEAT_BUF_SIZE;
+                if(beatRepLen < 64) beatRepLen = 64;
+                beatRepPlaying = true;
+                /* Set read pointer to start of current slice */
+                if(beatRepWp >= beatRepLen)
+                    beatRepRp = beatRepWp - beatRepLen;
+                else
+                    beatRepRp = 0;
+            }
+        }
+        break;
+    case CMD_DELAY_STEREO:
+        if(len >= 1) delayPingPong = (bool)p[0];
+        break;
+    case CMD_CHORUS_STEREO:
+        if(len >= 1) chorusStereoMode = (bool)p[0];
+        break;
+    case CMD_EARLY_REF_ACTIVE:
+        if(len >= 1) erActive = (bool)p[0];
+        break;
+    case CMD_EARLY_REF_MIX:
+        if(len >= 1) erMix = clampF((float)p[0] / 100.0f, 0.0f, 1.0f);
+        break;
+
+    /* ════════════════════════════════════════════
+     *  CHOKE GROUPS
+     * ════════════════════════════════════════════ */
+    case CMD_CHOKE_GROUP:
+        if(len >= 2 && p[0] < MAX_PADS)
+            chokeGroup[p[0]] = (p[1] > 8) ? 0 : p[1]; /* 0=none, 1-8 */
+        break;
+
+    /* ════════════════════════════════════════════
+     *  SONG MODE
+     * ════════════════════════════════════════════ */
+    case CMD_SONG_UPLOAD:
+        /* [count(1), entries×{pattern(1), repeats(1)}] */
+        if(len >= 1){
+            uint8_t cnt = p[0];
+            if(cnt > SONG_MAX_ENTRIES) cnt = SONG_MAX_ENTRIES;
+            for(uint8_t si = 0; si < cnt && (1 + si*2 + 2) <= len; si++){
+                songChain[si].pattern = p[1 + si*2] & 7;
+                songChain[si].repeats = p[2 + si*2];
+                if(songChain[si].repeats == 0) songChain[si].repeats = 1;
+            }
+            songLength = cnt;
+        }
+        break;
+    case CMD_SONG_CONTROL:
+        if(len >= 1){
+            if(p[0] == 1){
+                /* Play song mode */
+                if(songLength > 0){
+                    songPlaying = true;
+                    songIdx = 0;
+                    songRepeatCnt = 0;
+                    dseq.currentPattern = songChain[0].pattern;
+                    dseq.currentStep = -1;
+                    dseq.samplesElapsed = 0;
+                    dseq.playing = true;
+                }
+            } else if(p[0] == 0){
+                songPlaying = false;
+            } else if(p[0] == 2){
+                songPlaying = false;
+                songIdx = 0;
+                songRepeatCnt = 0;
+            }
+        }
+        break;
+    case CMD_SONG_GET_POS:
+        {
+            uint8_t resp[4] = {
+                songIdx,
+                songPlaying ? songChain[songIdx < songLength ? songIdx : 0].pattern : (uint8_t)0,
+                songRepeatCnt,
+                0
+            };
+            BuildResponse(CMD_SONG_GET_POS, hdr->sequence, resp, sizeof(resp));
+        }
+        return;
+
+    /* ════════════════════════════════════════════
+     *  EXPANDED PER-TRACK LFO
+     * ════════════════════════════════════════════ */
+    case CMD_TRACK_LFO_CONFIG:
+        /* [track, wave, target, rateHi, rateLo, depthHi, depthLo] */
+        if(len >= 7 && p[0] < MAX_PADS){
+            uint8_t t = p[0];
+            trkLfoWave[t]   = p[1] & 3;
+            trkLfoTarget[t] = p[2];
+            trkLfoRate[t]   = (float)((p[3] << 8) | p[4]) / 100.0f;
+            trkLfoDepth[t]  = (float)((p[5] << 8) | p[6]) / 1000.0f;
+            trkLfoActive[t] = (trkLfoDepth[t] > 0.001f);
+            trkFxRouted[t]  = true;
         }
         break;
 
@@ -5772,6 +6397,58 @@ static void InitFX()
         memset(trkFlgBuf[i],  0, sizeof(trkFlgBuf[i]));
     }
 
+    /* ── Mega Upgrade: init new master FX modules ── */
+    masterAutowah.Init(sr);
+    masterAutowah.SetLevel(0.5f);
+    masterAutowah.SetWah(0.0f);
+
+    masterLadderL.Init(sr);
+    masterLadderR.Init(sr);
+    masterLadderL.SetFreq(10000.f);
+    masterLadderR.SetFreq(10000.f);
+    masterLadderL.SetRes(0.3f);
+    masterLadderR.SetRes(0.3f);
+
+    masterSvfL.Init(sr);
+    masterSvfR.Init(sr);
+    masterSvfL.SetFreq(10000.f);
+    masterSvfR.SetFreq(10000.f);
+    masterSvfL.SetRes(0.3f);
+    masterSvfR.SetRes(0.3f);
+    masterSvfL.SetDrive(0.0f);
+    masterSvfR.SetDrive(0.0f);
+
+    erDelayL.Init();
+    erDelayR.Init();
+
+    masterDelayR.Init();
+    masterDelayR.SetDelay(sr * 0.25f);
+
+    memset(beatRepBufL, 0, sizeof(beatRepBufL));
+    memset(beatRepBufR, 0, sizeof(beatRepBufR));
+    beatRepActive = false;
+    beatRepDiv = 0;
+    beatRepWp = 0;
+    beatRepRp = 0;
+    beatRepPlaying = false;
+
+    memset(chokeGroup, 0, sizeof(chokeGroup));
+
+    songLength = 0;
+    songPlaying = false;
+    songIdx = 0;
+    songRepeatCnt = 0;
+
+    autowahActive = false;
+    autowahRouted = true;
+    erActive = false;
+    erRouted = true;
+    stereoWidth = 1.0f;
+    tapeStopActive = false;
+    tapeStopSpeed = 1.0f;
+    delayPingPong = false;
+    chorusStereoMode = true;
+
     /* ── Synth Engines Init ── */
     synth808.Init(sr);
     synth909.Init(sr);
@@ -5780,6 +6457,34 @@ static void InitFX()
     wtOsc.Init(sr);
     synthSH101.Init(sr);  /* I1 */
     synthFM2Op.Init(sr);  /* I2 */
+
+    /* Physical Modeling engine */
+    physModal.Init(sr);
+    physModal.SetFreq(220.f);
+    physModal.SetAccent(0.5f);
+    physModal.SetStructure(0.5f);
+    physModal.SetBrightness(0.5f);
+    physModal.SetDamping(0.5f);
+    physModalActive = false;
+
+    physString.Init(sr);
+    physString.SetFreq(220.f);
+    physString.SetAccent(0.5f);
+    physString.SetStructure(0.5f);
+    physString.SetBrightness(0.5f);
+    physString.SetDamping(0.5f);
+    physStringActive = false;
+
+    /* Noise/Texture engine */
+    noisePart.Init(sr);
+    noisePart.SetFreq(220.f);
+    noisePart.SetResonance(0.5f);
+    noisePart.SetRandomFreq(0.3f);
+    noisePart.SetDensity(0.5f);
+    noisePart.SetGain(0.6f);
+    noisePart.SetSpread(0.3f);
+    noisePartActive = false;
+
     ApplyDefaultSynthPresets();
     dcBlockL.Init(sr);    /* M3 */
     dcBlockR.Init(sr);
@@ -5800,6 +6505,14 @@ static void InitFX()
  * ═══════════════════════════════════════════════════════════════════ */
 int main()
 {
+    /* ── Enable FPU Flush-to-Zero + Default-NaN to prevent denormals ── */
+    /* Thread-mode FPSCR (for main loop) */
+    __asm volatile("VMRS r0, FPSCR\n"
+                   "ORR  r0, r0, #(1<<24)|(1<<25)\n"  /* FZ=1, DN=1 */
+                   "VMSR FPSCR, r0" ::: "r0");
+    /* FPDSCR — default FPSCR for ALL exception/ISR contexts (AudioCallback!) */
+    *(volatile uint32_t*)0xE000EF3Cu |= (1u << 24) | (1u << 25);
+
     /* ── Hardware init ── */
     hw.Init();
 
