@@ -177,7 +177,7 @@ public:
     float pitchDecay = 0.12f;
     float pitchAmt   = 3.0f;
     float attack     = 0.004f;
-    float drive      = 0.22f;
+    float drive      = 0.55f;
     float subLevel   = 0.15f;
     float volume     = 1.0f;
     float drift      = 0.15f;  /* A4: analog pitch drift [0..1] */
@@ -188,7 +188,7 @@ public:
         active_      = false;
         driftPhase_  = 0.0f;
         driftOffset_ = 0.0f;
-        clickFilter_.SetCoefs(sr_, 3500.0f, 0.8f);
+        clickFilter_.SetCoefs(sr_, 4800.0f, 1.2f);
         rng_.Seed(0xBD808000u);
     }
 
@@ -229,11 +229,14 @@ public:
         if (subPhase_ >= 1.0f) subPhase_ -= 1.0f;
         float sub = sinf(TR808_TWOPI * subPhase_) * subLevel;
 
+        float punchEnv = expf(-time_ / 0.0008f);
+        float punch    = punchEnv * 1.8f;
+
         float clickEnv = expf(-time_ / attack);
-        float click    = clickFilter_.ProcessBP(rng_.White()) * clickEnv * 0.5f;
+        float click    = clickFilter_.ProcessBP(rng_.White()) * clickEnv * 0.6f;
 
         float amp  = expf(-time_ / decay);
-        float mix  = sine + sub + click;
+        float mix  = sine + sub + punch + click;
 
         float g = 1.0f + drive * 4.0f;
         float output = mix > 0.0f
@@ -336,9 +339,13 @@ public:
 
         float snapEnv  = expf(-time_ / (decay * 0.9f));
         float nRaw = rng_.White();
+        /* Crack: pico de noise sin filtrar al inicio (~1.2ms) */
+        float crackEnv = expf(-time_ / 0.0012f);
+        float crack    = nRaw * crackEnv * snappy * 0.8f;
         /* A5: dos filtros BP con freq distintas para ruido con mas caracter */
         float noiseOut = (noiseFilter_.ProcessBP(nRaw) * 0.65f
-                        + snpFilter_.ProcessBP(nRaw)   * 0.35f) * snapEnv * snappy;
+                        + snpFilter_.ProcessBP(nRaw)   * 0.35f
+                        + crack) * snapEnv * snappy;
 
         float output = FastTanh((toneOut + noiseOut) * 1.4f);
 
@@ -523,14 +530,15 @@ public:
     float tone   = 0.5f;
     float volume = 1.0f;
 
-    void Init(float sr)            { BaseInit(sr, 7200.0f); }
+    void Init(float sr)            { BaseInit(sr, 8800.0f); }
     void Trigger(float v = 1.0f)   { BaseTrigger(v); }
 
     float Process() {
         if (!active_) return 0.0f;
         float hp  = hpFilter_.ProcessHP(MetallicCore());
         float env = expf(-time_ / decay);
-        float out = FastTanh(hp * (0.6f + tone * 0.8f) * 2.5f) * env;
+        env = env * env;  /* cuadrado: cierre mas seco y agresivo */
+        float out = FastTanh(hp * (0.7f + tone * 0.9f) * 3.4f) * env;
         time_ += dt_;
         if (env < 0.0005f) active_ = false;
         return out * volume * vel_;
@@ -549,7 +557,7 @@ public:
     float tone   = 0.5f;
     float volume = 1.0f;
 
-    void Init(float sr)           { BaseInit(sr, 6000.0f); }
+    void Init(float sr)           { BaseInit(sr, 7200.0f); }
     void Trigger(float v = 1.0f)  { BaseTrigger(v); }
     void Choke()                  { active_ = false; }
 
@@ -557,7 +565,7 @@ public:
         if (!active_) return 0.0f;
         float hp  = hpFilter_.ProcessHP(MetallicCore());
         float env = expf(-time_ / decay);
-        float out = FastTanh(hp * (0.6f + tone * 0.8f) * 2.2f) * env;
+        float out = FastTanh(hp * (0.7f + tone * 0.9f) * 2.9f) * env;
         time_ += dt_;
         if (env < 0.0005f) active_ = false;
         return out * volume * vel_;
@@ -1030,7 +1038,7 @@ public:
             chanVol_[i]  = 1.0f;
             chanMute_[i] = false;
         }
-        masterVol_  = 0.85f;
+        masterVol_  = 0.92f;
         limitState_ = 0.0f;
     }
 
@@ -1082,13 +1090,13 @@ public:
         add(INST_CYMBAL,    cymbal.Process());
 
         /* Soft limiter: peak follower + gain reduction
-         * Attack instantaneo, release lento ~0.5s a 48kHz
+         * Attack instantaneo, release lento ~0.2s a 48kHz
          * Evita clipping digital sin sonar como un compresor */
         mix *= masterVol_;
         float absv = fabsf(mix);
-        limitState_ = (absv > limitState_) ? absv : limitState_ * 0.99997f;
-        if (limitState_ > 0.95f)
-            mix *= 0.95f / limitState_;
+        limitState_ = (absv > limitState_) ? absv : limitState_ * 0.9985f;
+        if (limitState_ > 0.98f)
+            mix *= 0.98f / limitState_;
 
         return mix;
     }
@@ -1128,7 +1136,7 @@ public:
 
 private:
     float   sr_          = 48000.0f;
-    float   masterVol_   = 0.85f;
+    float   masterVol_   = 0.92f;
     float   limitState_  = 0.0f;
     float   chanVol_[INST_COUNT]  = {};
     bool    chanMute_[INST_COUNT] = {};

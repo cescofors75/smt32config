@@ -169,19 +169,17 @@ struct LoFiProcessor {
      * NUNCA llamar UpdateCache() desde Process() -- extremadamente caro. */
     void UpdateCache() {
         levels_  = powf(2.0f, bitDepth);          /* 1x por cambio, no por sample */
-        divInt_  = Clamp((int)sampleRateDiv, 1, 16);  /* entero para comparacion rapida */
+        divInt_  = Clamp((int)roundf(sampleRateDiv), 1, 16);  /* entero para comparacion rapida */
     }
 
     float Process(float input) {
-        /* Bit crush: usa levels_ precalculado -- 0 powf() en hot path */
-        float crushed = roundf(input * levels_) / levels_;
-
-        /* Sample-rate reduction: S&H con contador entero */
+        /* S&H primero: samplea a frecuencia reducida */
         if (++counter_ >= divInt_) {
             counter_ = 0;
-            held_    = crushed;
+            held_    = input;
         }
-        return held_;
+        /* Luego crush el valor retenido (como DAC real) */
+        return roundf(held_ * levels_) / levels_;
     }
 
     void Reset() { counter_ = 0; held_ = 0.0f; }
@@ -209,8 +207,8 @@ class Kick {
 public:
     float decay      = 0.25f;   /* [0.05 - 0.8]  s  corto = 505     */
     float pitch      = 60.0f;   /* [40   - 100]  Hz                 */
-    float pitchDecay = 0.03f;   /* [0.01 - 0.1]  s                  */
-    float drive      = 0.25f;   /* [0.0  - 1.0]  saturacion         */
+    float pitchDecay = 0.008f;  /* [0.005- 0.1]  s  caida rapida = 505 */
+    float drive      = 0.45f;   /* [0.0  - 1.0]  saturacion digital    */
     float lofi       = 0.3f;    /* [0.0  - 1.0]  cantidad lo-fi     */
     float volume     = 1.0f;
 
@@ -331,11 +329,11 @@ public:
         phase_ += pitch * dt_;
         if (phase_ >= 1.0f) phase_ -= 1.0f;
 
-        /* Tono: sine + LP suave para textura digital sin aliasing duro */
+        /* Tono: sine crudo + 3a armonica -- el caracter digital chiptune del 505 */
         float rawTone  = sinf(TR505_TWOPI * phase_);
-        float filtTone = toneF_.ProcessLP(rawTone);
+        float rawTone2 = sinf(TR505_TWOPI * phase_ * 1.5f);
         float toneEnv  = expf(-time_ / (decay * 0.45f));
-        float toneOut  = filtTone * toneEnv * tone;
+        float toneOut  = (rawTone * 0.75f + rawTone2 * 0.25f) * toneEnv * tone;
 
         /* Noise HP: brillo y snap */
         float noiseEnv = expf(-time_ / decay);
@@ -518,11 +516,11 @@ public:
     float tone   = 0.5f;
     float volume = 1.0f;
 
-    void Init(float sr) { BaseInit(sr, 5500.0f + tone * 2000.0f, 0x505AA01u); /* hihatC */ }
+    void Init(float sr) { BaseInit(sr, 5500.0f + tone * 1500.0f, 0x505AA01u); /* hihatC */ }
 
     void Trigger(float v = 1.0f) {
         /* Actualizar fc segun tone antes del trigger */
-        hpFilter_.SetCoefs(sr_, 5500.0f + tone * 2000.0f, 0.65f);
+        hpFilter_.SetCoefs(sr_, 5500.0f + tone * 1500.0f, 0.65f);
         BaseTrigger(v);
     }
 
@@ -530,7 +528,8 @@ public:
         if (!active_) return 0.0f;
         float hp  = hpFilter_.ProcessHP(rng_.White());
         float env = expf(-time_ / decay);
-        float out = FastTanh(hp * 2.0f) * env;
+        env = env * env;  /* cuadrado: cierre seco */
+        float out = FastTanh(hp * 2.6f) * env;
         out = lofiProc_.Process(out);
         time_ += dt_;
         if (env < 0.0005f) active_ = false;
@@ -551,10 +550,10 @@ public:
     float tone   = 0.5f;
     float volume = 1.0f;
 
-    void Init(float sr) { BaseInit(sr, 5000.0f + tone * 2000.0f, 0x505BB02u); /* hihatO */ }
+    void Init(float sr) { BaseInit(sr, 5000.0f + tone * 1500.0f, 0x505BB02u); /* hihatO */ }
 
     void Trigger(float v = 1.0f) {
-        hpFilter_.SetCoefs(sr_, 5000.0f + tone * 2000.0f, 0.65f);
+        hpFilter_.SetCoefs(sr_, 5000.0f + tone * 1500.0f, 0.65f);
         BaseTrigger(v);
     }
 
@@ -564,7 +563,8 @@ public:
         if (!active_) return 0.0f;
         float hp  = hpFilter_.ProcessHP(rng_.White());
         float env = expf(-time_ / decay);
-        float out = FastTanh(hp * 1.8f) * env;
+        env = env * sqrtf(env);  /* env^1.5: cierre seco pero no tan agresivo como closed */
+        float out = FastTanh(hp * 2.3f) * env;
         out = lofiProc_.Process(out);
         time_ += dt_;
         if (env < 0.0005f) active_ = false;
@@ -712,10 +712,15 @@ public:
         if (phase2_ >= 1.0f) phase2_ -= 1.0f;
         float sq2 = (phase2_ < 0.5f) ? 1.0f : -1.0f;
 
-        float bp  = bpF_.ProcessBP((sq1 + sq2) * 0.5f);
+        float raw = (sq1 + sq2) * 0.5f;
+        float bp  = bpF_.ProcessBP(raw);
         float env = expf(-time_ / decay);
 
-        float output = FastTanh(bp * env * 1.5f);
+        /* Click inicial percusivo -- onset del sample PCM */
+        float clickEnv = expf(-time_ / 0.0015f);
+        float click    = raw * clickEnv * 0.4f;
+
+        float output = FastTanh((bp * env + click) * 1.5f);
         output = lofiProc_.Process(output);
 
         time_ += dt_;
@@ -968,7 +973,7 @@ public:
             chanVol_[i]  = 1.0f;
             chanMute_[i] = false;
         }
-        masterVol_  = 0.85f;
+        masterVol_  = 0.92f;
         limitState_ = 0.0f;
     }
 
@@ -1012,9 +1017,9 @@ public:
         /* Soft limiter */
         mix *= masterVol_;
         float absv = fabsf(mix);
-        limitState_ = (absv > limitState_) ? absv : limitState_ * 0.99997f;
-        if (limitState_ > 0.95f)
-            mix *= 0.95f / limitState_;
+        limitState_ = (absv > limitState_) ? absv : limitState_ * 0.9985f;
+        if (limitState_ > 0.98f)
+            mix *= 0.98f / limitState_;
 
         return mix;
     }
@@ -1063,7 +1068,7 @@ public:
 
 private:
     float  sr_          = 48000.0f;
-    float  masterVol_   = 0.85f;
+    float  masterVol_   = 0.92f;
     float  limitState_  = 0.0f;
     float  chanVol_[INST_COUNT]  = {};
     bool   chanMute_[INST_COUNT] = {};

@@ -206,15 +206,18 @@ public:
 
         /* Click: noise filtrado BP (mas autentico que sine 3kHz de v1.0) */
         float clickEnv = expf(-time_ / 0.0008f);
+        float punch    = clickEnv * 2.0f;  /* impulso puro sin filtrar */
         float click    = clickF_.ProcessBP(rng_.White()) * clickEnv * clickAmt;
 
         /* Compresion correcta: blend amp normal + amp comprimida */
         float ampNorm = expf(-time_ / decay);
         float ampComp = expf(-time_ / (decay * 2.5f));
-        float amp     = ampNorm * (1.0f - compAlpha_) + ampComp * compAlpha_;
+        /* Sustain boost: el 909 real eleva brevemente los primeros ~30ms */
+        float sustainBoost = expf(-time_ / 0.03f) * compression * 0.3f;
+        float amp     = ampNorm * (1.0f - compAlpha_) + ampComp * compAlpha_ + sustainBoost;
 
         /* Saturacion asinmetrica: caracter de transistor */
-        float mix = sine + sub + click;
+        float mix = sine + sub + punch + click;
         float g   = 1.0f + drive * 5.0f;
         float out = mix > 0.0f
             ? FastTanh(mix * g)
@@ -266,6 +269,7 @@ public:
         dt_ = 1.0f / sr_;
         active_ = false;
         noiseF_.SetCoefs(sr_, 5800.0f, 1.0f);
+        bodyF_.SetCoefs(sr_, 1200.0f, 0.8f);  /* BP para cuerpo del snare */
         rng_.Seed(0x9095E01u); /* snare */
     }
 
@@ -276,7 +280,9 @@ public:
         vel_     = VelCurve(velocity);
         /* HP pitch-tracked: sigue el tono del snare */
         noiseF_.SetCoefs(sr_, pitch * 32.0f, 1.0f);
+        bodyF_.SetCoefs(sr_, pitch * 6.0f, 0.8f);  /* BP body tracks pitch */
         noiseF_.Reset();
+        bodyF_.Reset();
         rng_.Seed(0x9095E01u ^ (uint32_t)(velocity * 4567));
     }
 
@@ -297,9 +303,15 @@ public:
         float toneEnv  = expf(-time_ / (decay * 0.4f));
         float toneOut  = (t1 * 0.7f + t2 * 0.3f) * toneEnv * tone;
 
-        /* Noise HP: mas blanco y brillante que 808 */
+        /* Noise HP + BP body: el 909 real mezcla ambos */
         float snapEnv  = expf(-time_ / decay);
-        float noiseOut = noiseF_.ProcessHP(rng_.White()) * snapEnv * snappy * 1.4f;
+        float nRaw = rng_.White();
+        /* Crack: impulso sin filtrar al inicio */
+        float crackEnv = expf(-time_ / 0.0010f);
+        float crack    = nRaw * crackEnv * snappy * 0.9f;
+        float noiseHP  = noiseF_.ProcessHP(nRaw) * 1.4f;
+        float noiseBP  = bodyF_.ProcessBP(nRaw) * 0.7f;  /* cuerpo medio */
+        float noiseOut = (noiseHP + noiseBP + crack) * snapEnv * snappy;
 
         float output = FastTanh((toneOut + noiseOut) * 2.0f);
 
@@ -320,6 +332,7 @@ private:
     bool  active_ = false;
     float time_ = 0.0f, phase1_ = 0.0f, phase2_ = 0.0f, vel_ = 1.0f;
     SVF   noiseF_;
+    SVF   bodyF_;   /* BP para cuerpo del snare */
     Rng   rng_;
 };
 
@@ -468,7 +481,7 @@ public:
     float tone   = 0.6f;
     float volume = 1.0f;
 
-    void Init(float sr) { BaseInit(sr, 8000.0f); }
+    void Init(float sr) { BaseInit(sr, 9200.0f); }
 
     void Trigger(float v = 1.0f) { BaseTrigger(v); }
 
@@ -476,8 +489,9 @@ public:
         if (!active_) return 0.0f;
         float hp  = hpFilter_.ProcessHP(MetallicCore());
         float env = expf(-time_ / decay);
+        env = env * env;  /* cuadrado: cierre seco */
         /* Mas brillante que 808: gain mas alto, tone bias hacia treble */
-        float out = FastTanh(hp * (0.7f + tone * 0.9f) * 3.0f) * env;
+        float out = FastTanh(hp * (0.75f + tone * 0.95f) * 3.6f) * env;
         time_ += dt_;
         if (env < 0.0005f) active_ = false;
         return out * volume * vel_;
@@ -496,7 +510,7 @@ public:
     float tone   = 0.6f;
     float volume = 1.0f;
 
-    void Init(float sr) { BaseInit(sr, 7200.0f); }
+    void Init(float sr) { BaseInit(sr, 8000.0f); }
 
     void Trigger(float v = 1.0f) { BaseTrigger(v); }
 
@@ -506,7 +520,7 @@ public:
         if (!active_) return 0.0f;
         float hp  = hpFilter_.ProcessHP(MetallicCore());
         float env = expf(-time_ / decay);
-        float out = FastTanh(hp * (0.7f + tone * 0.9f) * 2.8f) * env;
+        float out = FastTanh(hp * (0.75f + tone * 0.95f) * 3.2f) * env;
         time_ += dt_;
         if (env < 0.0005f) active_ = false;
         return out * volume * vel_;
@@ -622,20 +636,23 @@ public:
 
     void Init(float sampleRate) {
         BaseInit(sampleRate, 6500.0f);
-        bellF_.SetCoefs(sampleRate, 980.0f, 8.0f);
+        bellF1_.SetCoefs(sampleRate, 980.0f, 3.5f);   /* fundamental: Q reducido */
+        bellF2_.SetCoefs(sampleRate, 2350.0f, 4.0f);  /* 2nd partial ~2.4x */
     }
 
     void Trigger(float velocity = 1.0f) {
         BaseTrigger(velocity);
         bellImpulse_ = 1.0f;
-        bellF_.Reset();
+        bellF1_.Reset();
+        bellF2_.Reset();
     }
 
     float Process() {
         if (!active_) return 0.0f;
 
-        /* Componente bell: resonador de impulso (ping del domo) */
-        float bell = bellF_.ProcessBP(bellImpulse_);
+        /* Componente bell: dos partials para sonido metalico real */
+        float bell1 = bellF1_.ProcessBP(bellImpulse_);
+        float bell2 = bellF2_.ProcessBP(bellImpulse_) * 0.4f;
         bellImpulse_ = 0.0f;
         float bellEnv = expf(-time_ / bellDecay);
 
@@ -645,7 +662,7 @@ public:
         float tailEnv = expf(-time_ / decay);
         float attack  = 1.0f - expf(-time_ / 0.002f);
 
-        float out = bell * bellEnv * bellAmt
+        float out = (bell1 + bell2) * bellEnv * bellAmt
                   + hp   * tailEnv * attack * (0.3f + tone * 0.4f);
 
         out = FastTanh(out * 1.6f);
@@ -662,7 +679,8 @@ public:
     void SetBellAmt(float a)   { bellAmt   = Clamp(a, 0.0f,  1.0f); }
 
 private:
-    SVF   bellF_;
+    SVF   bellF1_;
+    SVF   bellF2_;
     float bellImpulse_ = 0.0f;
 };
 
@@ -705,8 +723,8 @@ public:
         /* Noise extra para brillo y densidad del crash */
         float extraNoise = extraNoiseF_.ProcessHP(rng2_.White()) * noiseAmt;
 
-        /* Onset mas lento que el ride -- el crash "sube" antes de decaer */
-        float attack = 1.0f - expf(-time_ / 0.003f);
+        /* Onset rapido -- el crash real tiene attack casi instantaneo */
+        float attack = 1.0f - expf(-time_ / 0.0005f);
         float env    = expf(-time_ / decay);
 
         float out = (hp + extraNoise) * env * attack * (0.35f + tone * 0.5f);
@@ -868,7 +886,7 @@ public:
             chanVol_[i]  = 1.0f;
             chanMute_[i] = false;
         }
-        masterVol_  = 0.85f;
+        masterVol_  = 0.92f;
         limitState_ = 0.0f;
     }
 
@@ -910,13 +928,12 @@ public:
         add(INST_RIMSHOT, rimshot.Process());
 
         /* Soft limiter: peak follower con attack instantaneo
-         * y release lento (~0.5s) -- evita clipping sin sonar
-         * como compresor cuando kick+snare+clap coinciden */
+         * y release ~0.2s -- evita clipping sin comer transientes */
         mix *= masterVol_;
         float absv = fabsf(mix);
-        limitState_ = (absv > limitState_) ? absv : limitState_ * 0.99997f;
-        if (limitState_ > 0.95f)
-            mix *= 0.95f / limitState_;
+        limitState_ = (absv > limitState_) ? absv : limitState_ * 0.9985f;
+        if (limitState_ > 0.98f)
+            mix *= 0.98f / limitState_;
 
         return mix;
     }
@@ -954,7 +971,7 @@ public:
 
 private:
     float  sr_          = 48000.0f;
-    float  masterVol_   = 0.85f;
+    float  masterVol_   = 0.92f;
     float  limitState_  = 0.0f;
     float  chanVol_[INST_COUNT]  = {};
     bool   chanMute_[INST_COUNT] = {};

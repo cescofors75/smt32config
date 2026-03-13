@@ -187,15 +187,20 @@ public:
                 break;
             case ENV_DECAY:
                 value_ -= (1.0f - sustain) / (decay_s * sr_);
-                if (value_ <= sustain) { value_ = sustain; stage_ = ENV_SUSTAIN; }
+                if (value_ <= sustain) {
+                    value_ = sustain;
+                    stage_ = (sustain < 1e-4f) ? ENV_IDLE : ENV_SUSTAIN;
+                }
                 break;
             case ENV_SUSTAIN:
                 value_ = sustain;
                 break;
-            case ENV_RELEASE:
-                value_ -= value_ / (release_s * sr_);
+            case ENV_RELEASE: {
+                float releaseCoef = expf(-1.0f / (release_s * sr_));
+                value_ *= releaseCoef;
                 if (value_ < 1e-5f) { value_ = 0.0f; stage_ = ENV_IDLE; }
                 break;
+            }
             default:
                 value_ = 0.0f;
                 break;
@@ -251,25 +256,21 @@ public:
     float Process(float input, float fc, float res) {
         /* ── Pre-warping bilineal ── */
         float wd = TB303_TWOPI * fc;
-        float wa = sr2_ * tanf(wd / sr2_);   /* compensación bilineal */
+        float wa = sr2_ * tanf(wd / sr2_);
         float g  = wa / sr2_;
 
-        /* Coeficiente de 1 polo */
-        float G = g / (1.0f + g);
+        float G  = g / (1.0f + g);
+        float k  = res * 3.88f;
 
-        /* Retroalimentación (k = 4·res para 24dB) */
-        float k = res * 3.88f;  /* 3.88 en vez de 4 → evita hard-clip */
+        /* Estado global estimado con todos los stages */
+        float Gp = G * G * G * G;
+        float SG = G*G*G*s_[0] + G*G*s_[1] + G*s_[2] + s_[3];
+        float S  = SG / (1.0f + k * Gp);
 
-        /* Estimación inicial del loop de retroalimentación */
-        float S = (G*(G*(G*s_[0] + s_[1]) + s_[2]) + s_[3]) / (1.0f + k*G*G*G*G);
-        float u = FastTanh((input - k * S) * 0.5f); /* escala 0.5: carácter diodo */
+        /* Sin el 0.5f — ese factor mataba la resonancia */
+        float u = FastTanh(input - k * S);
 
-        /* 1 iteración Newton para mejorar precisión de la FB no-lineal */
-        /* (opcional: omitir en plataformas muy limitadas) */
-        float S2 = (G*(G*(G*FastTanh(u) + s_[1]) + s_[2]) + s_[3]) / (1.0f + k*G*G*G*G);
-        u = FastTanh((input - k * S2) * 0.5f);
-
-        /* 4 stages LP de 1 polo */
+        /* 4 stages LP de 1 polo con no-linealidad */
         float v0 = (u    - s_[0]) * G;  z_[0] = v0 + s_[0]; s_[0] = z_[0] + v0;
         float v1 = (FastTanh(z_[0]) - s_[1]) * G; z_[1] = v1 + s_[1]; s_[1] = z_[1] + v1;
         float v2 = (FastTanh(z_[1]) - s_[2]) * G; z_[2] = v2 + s_[2]; s_[2] = z_[2] + v2;
@@ -295,7 +296,7 @@ public:
         phase_ = 0.0f;
         dt_    = 1.0f / sr;
         /* Semilla pseudo-aleatoria */
-        rng_   = 0xDEADBEEF;
+        rng_   = 0xDEADBEEF12345678ULL;
     }
 
     /** Devuelve offset de semitono normalizado en [-1, 1] */
@@ -317,12 +318,12 @@ private:
     float dt_    = 1.0f / 48000.0f;
     float prev_  = 0.0f;
     float curr_  = 0.0f;
-    uint32_t rng_ = 0xDEADBEEF;
+    uint64_t rng_ = 0xDEADBEEF12345678ULL;
 
     float NextRand() {
         rng_ ^= rng_ << 13;
-        rng_ ^= rng_ >> 17;
-        rng_ ^= rng_ << 5;
+        rng_ ^= rng_ >> 7;
+        rng_ ^= rng_ << 17;
         return (float)(rng_ & 0xFFFF) / 65535.0f;
     }
 };
@@ -390,8 +391,9 @@ public:
             ampEnv_.Retrigger();
         }
 
-        /* Accent: boost de envelope */
+        /* Accent: boost de envelope + chirp rápido */
         filterEnvScale_ = accent_ ? (1.0f + params.accentAmt * 0.5f) : 1.0f;
+        if (accent_) accentChirpEnv_ = params.accentAmt * 8000.0f;
 
         gateOn_ = true;
         active_ = true;
@@ -458,7 +460,11 @@ public:
         /* ── 2. PITCH (slide + bend + drift) ── */
         if (sliding_) {
             float slideCoef = expf(-dt_ / Clamp(params.slideTime, 0.01f, 0.5f));
-            currentFreq_ = currentFreq_ * slideCoef + targetFreq_ * (1.0f - slideCoef);
+            /* Slide en dominio logarítmico (semitones) — portamento natural */
+            float curSemi = log2f(currentFreq_ / 440.0f) * 12.0f + 69.0f;
+            float tgtSemi = log2f(targetFreq_  / 440.0f) * 12.0f + 69.0f;
+            curSemi = curSemi * slideCoef + tgtSemi * (1.0f - slideCoef);
+            currentFreq_ = 440.0f * powf(2.0f, (curSemi - 69.0f) / 12.0f);
             if (fabsf(currentFreq_ - targetFreq_) < 0.05f) {
                 currentFreq_ = targetFreq_;
                 sliding_ = false;
@@ -499,17 +505,17 @@ public:
         /* ── 5. OVERDRIVE pre-filtro (waveshaper asimétrico) ── */
         if (params.overdrive > 0.001f) {
             float drive = 1.0f + params.overdrive * 7.0f;
-            /* Waveshaper asimétrico: más distorsión positiva que negativa
-             * → carácter "chirpy" de la 303 */
+            float dcOffset = params.overdrive * 0.08f;
+            /* Waveshaper asimétrico con offset DC — diodos de la 303 */
             osc = osc > 0.0f
-                ? FastTanh(osc * drive)
-                : FastTanh(osc * drive * 0.7f);
+                ? FastTanh((osc + dcOffset) * drive)
+                : FastTanh((osc + dcOffset) * drive * 0.5f);
         }
 
         /* ── 6. FILTRO LADDER ── */
-        float accentBoost = accent_ ? params.accentAmt * 5000.0f : 0.0f;
-        float envAmount   = params.envMod * 12000.0f * fEnv;
-        float fc = Clamp(params.cutoff + envAmount + accentBoost, 20.0f, sr_ * 0.48f);
+        if (accent_) accentChirpEnv_ *= expf(-dt_ / 0.025f);  /* 25ms decay chirp */
+        float envAmount = params.envMod * 12000.0f * fEnv;
+        float fc = Clamp(params.cutoff + envAmount + accentChirpEnv_, 20.0f, sr_ * 0.48f);
 
         float res = params.resonance;
         if (accent_) res = Clamp(res + params.accentAmt * 0.25f, 0.0f, 0.97f);
@@ -588,6 +594,7 @@ private:
 
     /* ── Envelope scale para accent ── */
     float filterEnvScale_ = 1.0f;
+    float accentChirpEnv_ = 0.0f;  /* chirp rápido del accent */
 
     /* ── Módulos ── */
     DiodeLadder filter_;
@@ -624,15 +631,15 @@ public:
         synth_    = synth;
         playing_  = false;
         step_     = 0;
-        sampleCount_ = 0;
+        stepPhase_ = 0.0f;
         SetBpm(bpm);
         SetStepCount(MAX_STEPS);
     }
 
     void SetBpm(float bpm) {
         bpm_ = Clamp(bpm, 20.0f, 300.0f);
-        /* Un paso = 1 corchea = 60/(bpm*2) segundos */
-        samplesPerStep_ = (int)(sr_ * 60.0f / (bpm_ * 2.0f));
+        /* Un paso = 1 corchea = 60/(bpm*2) segundos — float para evitar drift */
+        samplesPerStepF_ = sr_ * 60.0f / (bpm_ * 2.0f);
     }
 
     void SetStepCount(int n) {
@@ -643,14 +650,17 @@ public:
         if (index >= 0 && index < MAX_STEPS) steps_[index] = s;
     }
 
-    void Start() { playing_ = true; sampleCount_ = 0; step_ = 0; }
+    void Start() { playing_ = true; stepPhase_ = 0.0f; step_ = 0; }
     void Stop()  { playing_ = false; if (synth_) synth_->NoteOff(); }
 
     /** Llamar cada muestra desde el audio callback */
     void Process() {
         if (!playing_ || !synth_) return;
 
-        if (sampleCount_ == 0) {
+        float prevPhase = stepPhase_;
+        stepPhase_ += 1.0f;
+
+        if (prevPhase < 1.0f) {
             /* Nuevo paso */
             const Step& s = steps_[step_];
             if (s.gate) {
@@ -663,13 +673,13 @@ public:
         /* Gate off a 3/4 del paso (excepto si hay slide al siguiente) */
         int nextStep = (step_ + 1) % stepCount_;
         bool nextSlide = steps_[nextStep].slide;
-        if (!nextSlide && sampleCount_ == (samplesPerStep_ * 3 / 4)) {
+        float gateOff = samplesPerStepF_ * 0.75f;
+        if (!nextSlide && prevPhase < gateOff && stepPhase_ >= gateOff) {
             synth_->NoteOff();
         }
 
-        sampleCount_++;
-        if (sampleCount_ >= samplesPerStep_) {
-            sampleCount_ = 0;
+        if (stepPhase_ >= samplesPerStepF_) {
+            stepPhase_ -= samplesPerStepF_;
             step_ = nextStep;
         }
     }
@@ -680,9 +690,9 @@ public:
 
 private:
     float   sr_             = 48000.0f;
-    float   bpm_            = 120.0f;
-    int     samplesPerStep_ = 12000;
-    int     sampleCount_    = 0;
+    float   bpm_              = 120.0f;
+    float   samplesPerStepF_  = 12000.0f;
+    float   stepPhase_        = 0.0f;
     int     step_           = 0;
     int     stepCount_      = MAX_STEPS;
     bool    playing_        = false;

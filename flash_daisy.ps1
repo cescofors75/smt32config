@@ -34,6 +34,21 @@ function Invoke-PythonScript {
 }
 
 "=== FLASH DAISY $(Get-Date -Format s) ===" | Out-File -FilePath $log -Encoding utf8
+
+# ── Pre-generar samples.bin ANTES de entrar en DFU (evita timeout) ──
+if(-not (Test-Path $wavblob)) {
+    Write-Host 'Generando samples.bin con pack_wavs.py (antes de DFU)...' -ForegroundColor Yellow
+    $genResult = Invoke-PythonScript 'pack_wavs.py' 2>&1 | Tee-Object -FilePath $log -Append | Out-String
+    if(Test-Path $wavblob) {
+        'RESULT=SAMPLES_BLOB_GENERATED' | Tee-Object -FilePath $log -Append
+        Write-Host 'samples.bin generado correctamente' -ForegroundColor Green
+    } else {
+        'RESULT=SAMPLES_BLOB_MISSING' | Tee-Object -FilePath $log -Append
+        Write-Host 'No se pudo generar build/samples.bin' -ForegroundColor Yellow
+        if($genResult) { $genResult | Tee-Object -FilePath $log -Append | Out-Null }
+    }
+}
+
 Write-Host 'PASO 1/2: Presiona BOOT + RESET en la Daisy (ROM DFU)...' -ForegroundColor Yellow
 
 $found = $false
@@ -84,19 +99,6 @@ if(-not $found2) {
 Write-Host 'Flasheando firmware app (QSPI @ 0x90040000)...' -ForegroundColor Cyan
 
 $appAddress = '0x90040000'
-if(-not (Test-Path $wavblob)) {
-    Write-Host 'samples.bin no existe; generando con pack_wavs.py...' -ForegroundColor Yellow
-    $genResult = Invoke-PythonScript 'pack_wavs.py' 2>&1 | Tee-Object -FilePath $log -Append | Out-String
-    if(Test-Path $wavblob) {
-        'RESULT=SAMPLES_BLOB_GENERATED' | Tee-Object -FilePath $log -Append
-        Write-Host 'samples.bin generado correctamente' -ForegroundColor Green
-    } else {
-        'RESULT=SAMPLES_BLOB_MISSING' | Tee-Object -FilePath $log -Append
-        Write-Host 'No se pudo generar build/samples.bin' -ForegroundColor Yellow
-        if($genResult) { $genResult | Tee-Object -FilePath $log -Append | Out-Null }
-    }
-}
-
 if(-not (Test-Path $wavblob)) {
     $appAddress = '0x90040000:leave'
 }
