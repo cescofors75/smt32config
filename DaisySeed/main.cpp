@@ -25,10 +25,37 @@
 #define USE_DAISYSP_LGPL
 #include "daisysp.h"
 #include "ff_gen_drv.h"
+#include "../../shared/red808_protocol_codes.h"
 #include <string.h>
 #include <math.h>
 #include <stdio.h>
 #include <strings.h>
+
+#ifndef RED808_ENABLE_UART_LEGACY
+#define RED808_ENABLE_UART_LEGACY 0
+#endif
+
+/* ═══════════════════════════════════════════════════════════════════
+ *  FAST MATH — sinf/expf overrides for synth engine hot paths
+ *  sinf: corrected parabolic, max error ~0.06% — inaudible in drums
+ *  expf: Schraudolph IEEE 754 bit-trick, ~4% error — perfect for envelopes
+ *  These macros ONLY affect the synth headers below.
+ * ═══════════════════════════════════════════════════════════════════ */
+static inline float __fast_sinf(float x) {
+    float phase = x * 0.15915494f;          /* x / (2*pi) */
+    phase -= (float)(int)(phase);
+    if(phase < 0.0f) phase += 1.0f;
+    float p = 2.0f * phase - 1.0f;          /* [-1, 1)    */
+    float y = 4.0f * p * (1.0f - fabsf(p));
+    return -(0.225f * (y * fabsf(y) - y) + y);
+}
+static inline float __fast_expf(float x) {
+    union { float f; int32_t i; } v;
+    v.i = (int32_t)(12102203.0f * x) + 1065353216;
+    return (v.i > 0) ? v.f : 0.0f;
+}
+#define sinf(x) __fast_sinf(x)
+#define expf(x) __fast_expf(x)
 
 /* Synth engine libraries */
 #include "synth/tr808.h"
@@ -40,6 +67,9 @@
 #include "synth/fm2op.h"     /* I2: 2-operator FM Yamaha-style */
 #include "synth/demo_mode.h"
 
+#undef sinf
+#undef expf
+
 using namespace daisy;
 using namespace daisysp;
 
@@ -47,20 +77,19 @@ using namespace daisysp;
  *  1. HARDWARE
  * ═══════════════════════════════════════════════════════════════════ */
 DaisySeed hw;
+#if RED808_ENABLE_UART_LEGACY
 UartHandler uart_slave;
-
-/* SPI1 Slave — Comunicación ESP32-S3 master
- * Pines: D7=PG10(NSS) D8=PG11(SCK) D9=PB4(MISO) D10=PB5(MOSI)
- */
-static DMA_HandleTypeDef  hdma_spi1_rx;
-static DMA_HandleTypeDef  hdma_spi1_tx;
+#endif
+static CpuLoadMeter audioLoadMeter;
 
 /* ═══════════════════════════════════════════════════════════════════
  *  2. CONFIGURACIÓN
  * ═══════════════════════════════════════════════════════════════════ */
 #define SAMPLE_RATE                 48000
 #define AUDIO_BLOCK        128
+#if RED808_ENABLE_UART_LEGACY
 #define DAISY_UART_BAUD    230400
+#endif
 #define MAX_PADS           24
 #define MAX_VOICES         32
 #define MAX_SAMPLE_BYTES   (96000 * 2)   /* ~2.0 s per pad @ 48000  */
@@ -272,7 +301,7 @@ enum MasterFxRouteId : uint8_t {
 #define CMD_DSQ_UPLOAD_TRACK    0xD0  /* [pat,trk,stepCount,rsvd + N×{act,vel,div,prob}] */
 #define CMD_DSQ_SET_STEP        0xD1  /* [pat,trk,step,active,vel,div,prob,rsvd]          */
 #define CMD_DSQ_CONTROL         0xD2  /* [0=stop, 1=play, 2=reset]                       */
-#define CMD_DSQ_SELECT_PATTERN  0xD3  /* [pat 0-7]                                        */
+#define CMD_DSQ_SELECT_PATTERN  0xD3  /* [pat 0-15]                                       */
 #define CMD_DSQ_SET_LENGTH      0xD4  /* [16/32/64]                                       */
 #define CMD_DSQ_SET_MUTE        0xD5  /* [track, muted 0/1]                               */
 #define CMD_DSQ_GET_POS         0xD6  /* no payload → [step,pat,playing,rsvd]             */
@@ -314,6 +343,11 @@ struct __attribute__((packed)) SPIPacketHeader {
     uint16_t length;
     uint16_t sequence;
     uint16_t checksum;
+};
+
+struct __attribute__((packed)) CpuLoadResponse {
+    float    cpuLoad;
+    uint32_t uptime;
 };
 
 #define RX_BUF_SIZE  536
@@ -425,6 +459,20 @@ static volatile bool kitMuteActive = false; /* true → AudioCallback outputs si
 /* ═══════════════════════════════════════════════════════════════════
  *  7. VOCES POLIFÓNICAS
  * ═══════════════════════════════════════════════════════════════════ */
+/* ── Voice steal priority (higher = harder to steal) ── */
+enum VoicePriority : uint8_t {
+    VPRI_LOW    = 0,   /* wavetable, noise — steal first  */
+    VPRI_MEDIUM = 1,   /* sampler, FM, SH-101, physical   */
+    VPRI_HIGH   = 2,   /* kick, snare, 303 — steal last   */
+};
+
+/* PadPriority() defined after dsqTrackEngine declaration */
+static inline VoicePriority PadPriority(uint8_t pad);
+
+/* 5 ms fade-out coefficient: 0.9986^240 ≈ 0.001 → ~71 dB fade in 240 samples (5 ms @ 48 kHz) */
+static constexpr float STEAL_FADE_COEF  = 0.9986f;
+static constexpr float STEAL_FADE_FLOOR = 0.001f;
+
 struct Voice {
     bool     active;
     uint8_t  pad;
@@ -439,6 +487,9 @@ struct Voice {
     uint8_t  envStage; /* 0=attack,1=decay,2=bypass */
     uint32_t age;
     uint32_t maxLen;  /* 0 = full sample, else corta al llegar aquí */
+    /* ── Steal fade ── */
+    float    stealFade;     /* 1.0 = normal, decaying → 0 when being stolen */
+    bool     stealPending;  /* true = fading out for steal                  */
 };
 static Voice   voices[MAX_VOICES];
 static uint32_t voiceAge = 0;
@@ -456,7 +507,7 @@ static float trackGain[MAX_PADS];
 /* ═══════════════════════════════════════════════════════════════════
  *  8b. DAISY SEQUENCER  (sample-accurate, BPM clock in AudioCallback)
  * ═══════════════════════════════════════════════════════════════════ */
-#define DSQ_PATTERNS   8
+#define DSQ_PATTERNS   16
 #define DSQ_TRACKS    16
 #define DSQ_MAX_STEPS 64
 
@@ -484,7 +535,7 @@ struct DsqStepFull {
     uint8_t  _pad[1];     /* align to 12 bytes */
 };  /* 12 bytes */
 
-/* 8 patterns × 16 tracks × 64 steps × 12B = ~98 KB → SDRAM */
+/* 16 patterns × 16 tracks × 64 steps × 12B = ~196 KB → SDRAM */
 DSY_SDRAM_BSS static DsqStepFull dsqSteps[DSQ_PATTERNS][DSQ_TRACKS][DSQ_MAX_STEPS];
 
 struct DaisySeqState {
@@ -519,6 +570,27 @@ static PendingTrigger pendingTriggers[DSQ_TRACKS];
 /* Track → synth engine mapping  (-1 = sampler, 0=808, 1=909, 2=505, 3=303)
  * Updated via CMD_DSQ_SET_TRACK_ENGINE.  Default: all tracks use sampler. */
 static int8_t dsqTrackEngine[DSQ_TRACKS];
+
+/* Map synth-engine (or -1 for sampler) + drum instrument to priority */
+static inline VoicePriority PadPriority(uint8_t pad)
+{
+    if(pad >= DSQ_TRACKS) return VPRI_MEDIUM;
+    int8_t eng = dsqTrackEngine[pad];
+    switch(eng){
+        case SYNTH_ENGINE_808:
+        case SYNTH_ENGINE_909:
+        case SYNTH_ENGINE_505:
+            /* Kick (pad 0) and Snare (pad 1) are HIGH; rest MEDIUM */
+            return (pad <= 1) ? VPRI_HIGH : VPRI_MEDIUM;
+        case SYNTH_ENGINE_303:  return VPRI_HIGH;
+        case SYNTH_ENGINE_SH101:
+        case SYNTH_ENGINE_FM2OP:
+        case SYNTH_ENGINE_PHYS: return VPRI_MEDIUM;
+        case SYNTH_ENGINE_WTOSC:
+        case SYNTH_ENGINE_NOISE: return VPRI_LOW;
+        default: /* sampler */  return VPRI_MEDIUM;
+    }
+}
 
 static void DsqUpdateSamplesPerStep() {
     float t = (dseq.tempo > 1.0f) ? dseq.tempo : 120.0f;
@@ -1219,6 +1291,44 @@ static volatile uint8_t evtHead = 0;  /* next write position  */
 static volatile uint8_t evtTail = 0;  /* next read  position  */
 static volatile uint8_t evtCount = 0; /* events in queue      */
 
+static void CopyFixedString(char* dst, size_t dstSize, const char* src)
+{
+    if(dstSize == 0)
+        return;
+    size_t i = 0;
+    if(src){
+        while(i + 1 < dstSize && src[i]){
+            dst[i] = src[i];
+            i++;
+        }
+    }
+    dst[i++] = 0;
+    while(i < dstSize)
+        dst[i++] = 0;
+}
+
+static bool JoinPath(char* dst, size_t dstSize, const char* left, const char* right)
+{
+    if(dstSize == 0)
+        return false;
+    size_t pos = 0;
+    const char* parts[2] = { left ? left : "", right ? right : "" };
+    for(const char* s = parts[0]; *s; ++s){
+        if(pos + 1 >= dstSize){ dst[dstSize - 1] = 0; return false; }
+        dst[pos++] = *s;
+    }
+    if(pos > 0 && dst[pos - 1] != '/'){
+        if(pos + 1 >= dstSize){ dst[dstSize - 1] = 0; return false; }
+        dst[pos++] = '/';
+    }
+    for(const char* s = parts[1]; *s; ++s){
+        if(pos + 1 >= dstSize){ dst[dstSize - 1] = 0; return false; }
+        dst[pos++] = *s;
+    }
+    dst[pos] = 0;
+    return true;
+}
+
 static void PushEvent(uint8_t type, uint8_t padCount,
                       uint32_t padMask24, const char* name)
 {
@@ -1234,7 +1344,7 @@ static void PushEvent(uint8_t type, uint8_t padCount,
     e.padMaskLo  = (uint8_t)(padMask24 & 0xFF);
     e.padMaskHi  = (uint8_t)((padMask24 >> 8) & 0xFF);
     e.padMaskXtra= (uint8_t)((padMask24 >> 16) & 0xFF);
-    if(name) strncpy(e.name, name, 23);
+    CopyFixedString(e.name, sizeof(e.name), name);
     evtHead = (evtHead + 1) % EVT_QUEUE_SIZE;
     evtCount++;
 }
@@ -1297,27 +1407,17 @@ static WtLfoTarget wtLfoTargetState = WT_LFO_WAVE;
 /* Forward-declare sanitizeF (defined in DSP HELPERS section) */
 static inline float sanitizeF(float v);
 
-/* M3: DC Offset Removal — HP 1-polo a ~20 Hz en salida estereo */
-struct SimpleDcBlock {
-    float x1 = 0.0f, y1 = 0.0f;
-    float a  = 0.9997f; /* 1 - 2*pi*20 / 48000 */
-    void Init(float sr) { a = 1.0f - (6.283185f * 20.0f / sr); }
-    float Process(float x) {
-        x = sanitizeF(x);
-        float y = x - x1 + a * y1;
-        y = sanitizeF(y);
-        x1 = x; y1 = y;
-        return y;
-    }
-};
-static SimpleDcBlock dcBlockL, dcBlockR;  /* M3 */
+static DcBlock dcBlockL, dcBlockR;
 
-/* M1: Group saturation (kick bus / hat bus) */
-static float kickGroupDrive = 0.15f;   /* 0=off, 1=max */
-static float hatGroupDrive  = 0.08f;
-/* M2: Group bus compressor envelopes */
-static float kickGroupEnv   = 0.0f;
-static float hatGroupEnv    = 0.0f;
+static inline uint8_t AudioCpuPercent()
+{
+    float load = audioLoadMeter.GetAvgCpuLoad();
+    if(!isfinite(load) || load < 0.0f)
+        load = 0.0f;
+    if(load > 1.0f)
+        load = 1.0f;
+    return (uint8_t)(load * 100.0f + 0.5f);
+}
 
 /* ═══════════════════════════════════════════════════════════════════
  *  Tabla de remap: padIndex del ESP32 → TR808::InstrumentId
@@ -1402,7 +1502,7 @@ static uint16_t synthActiveMask = 0x01FF;  /* all 9 engines active */
 /* ── Demo Mode ── */
 static Demo::DemoSequencer demoSeq;
 static constexpr bool kEnableSpiSlave = true;  /* modo integrado: comunicación con ESP32 master */
-static constexpr bool kUseSpiTransport = true;  /* true = SPI1 slave, false = UART1 (legacy) */
+static constexpr bool kUseSpiTransport = true;  /* Daisy usa SPI1 slave; UART legacy queda fuera por macro */
 static constexpr bool kEnableSynth505 = true;  /* habilitado para demo completa de arranque */
 static constexpr bool kAudioSafeMode = false; /* callback de audio real */
 static constexpr bool kBootDiagMinimal = false; /* diagnóstico extremo: solo LED, sin audio ni FX */
@@ -1499,15 +1599,9 @@ static inline float clampF(float v, float lo, float hi){
     return v < lo ? lo : (v > hi ? hi : v);
 }
 
-/* Kill NaN, Inf and denormals — returns 0 for any bad float */
+/* Kill NaN — with FTZ+DN enabled, denormals are flushed by hardware */
 static inline float sanitizeF(float v){
-    /* A finite float that is also not a denormal */
-    if(v != v) return 0.0f;                         /* NaN  */
-    if(v > 1e15f || v < -1e15f) return 0.0f;        /* ±Inf / huge */
-    /* Flush denormals to zero (they slow down ARM FPU) */
-    union { float f; uint32_t u; } u; u.f = v;
-    if((u.u & 0x7F800000u) == 0 && (u.u & 0x007FFFFFu) != 0) return 0.0f;
-    return v;
+    return (v == v) ? v : 0.0f;   /* only catch NaN; Inf clamped at output */
 }
 
 static inline float VolumeByteToGain(uint8_t volumePct)
@@ -2101,6 +2195,14 @@ static inline float AsymClip(float x){
     if(x >= 0.0f) return x / (1.0f + fabsf(x));
     float n = x * 0.7f;
     return (n / (1.0f + fabsf(n))) * 0.7f;
+}
+
+/* Fast pow for compressor ratio: base^exp via IEEE 754 bit-trick (~5% error) */
+static inline float fast_powf(float base, float exponent){
+    union { float f; int32_t i; } v;
+    v.f = base;
+    v.i = (int32_t)(exponent * (float)(v.i - 1065353216) + 1065353216.0f);
+    return (v.i > 0) ? v.f : 0.0f;
 }
 
 static float ApplyDist(float s, float drive, uint8_t mode){
@@ -2785,19 +2887,38 @@ static void TriggerPad(uint8_t pad, uint8_t velocity,
         }
     }
 
-    /* Find free slot or steal oldest */
+    /* Find free slot, or voice already fading, or steal by priority+age */
     int slot = -1;
+
+    /* 1. Free slot */
     for(int i = 0; i < MAX_VOICES; i++)
         if(!voices[i].active){ slot = i; break; }
 
+    /* 2. Slot already fading out (steal in progress) */
     if(slot < 0){
-        /* Voice stealing: prefer same pad, then oldest */
-        uint32_t oldest = UINT32_MAX; int best = 0;
+        for(int i = 0; i < MAX_VOICES; i++)
+            if(voices[i].stealPending){ slot = i; break; }
+    }
+
+    /* 3. Priority-aware stealing: prefer same-pad, then lowest priority + oldest */
+    if(slot < 0){
+        VoicePriority myPri = PadPriority(pad);
+        int best = -1;
+        int bestScore = -1; /* lower priority = higher score; tie-break by age */
         for(int i = 0; i < MAX_VOICES; i++){
+            /* Same pad → immediate reuse */
             if(voices[i].pad == pad){ best = i; break; }
-            if(voices[i].age < oldest){ oldest = voices[i].age; best = i; }
+            VoicePriority vp = PadPriority(voices[i].pad);
+            /* Never steal a higher-priority voice */
+            if(vp > myPri) continue;
+            int score = (2 - (int)vp) * 100000 + (int)(voiceAge - voices[i].age);
+            if(score > bestScore){ bestScore = score; best = i; }
         }
+        if(best < 0) best = 0; /* absolute fallback */
         slot = best;
+        /* Start 5 ms fade-out instead of hard cut */
+        voices[slot].stealPending = true;
+        voices[slot].stealFade    = 1.0f;
     }
 
     uint32_t len = sampleLength[pad];
@@ -2815,13 +2936,15 @@ static void TriggerPad(uint8_t pad, uint8_t velocity,
     float gL = gain * (1.0f - clampF(panF, 0.f, 1.f));
     float gR = gain * (1.0f + clampF(panF, -1.f, 0.f));
 
-    voices[slot].active   = true;
-    voices[slot].pad      = pad;
-    voices[slot].pos      = padReverse[pad] ? (float)(sampleLength[pad] - 1) : 0.0f;
-    voices[slot].speed    = padPitch[pad] * powf(2.0f, trkPitchCents[pad] / 1200.0f);
-    voices[slot].baseGain = gain;  // gain pre-pan — para LFO vol/pan live update
-    voices[slot].gainL    = gL;
-    voices[slot].gainR    = gR;
+    voices[slot].active       = true;
+    voices[slot].pad          = pad;
+    voices[slot].pos          = padReverse[pad] ? (float)(sampleLength[pad] - 1) : 0.0f;
+    voices[slot].speed        = padPitch[pad] * powf(2.0f, trkPitchCents[pad] / 1200.0f);
+    voices[slot].baseGain     = gain;  // gain pre-pan — para LFO vol/pan live update
+    voices[slot].gainL        = gL;
+    voices[slot].gainR        = gR;
+    voices[slot].stealFade    = 1.0f;
+    voices[slot].stealPending = false;
     if(trkEnvAdActive[pad]){
         float atkMs = clampF(trkEnvAttackMs[pad], 0.0f, 2000.0f);
         voices[slot].env = (atkMs <= 0.01f) ? 1.0f : 0.0f;
@@ -3023,6 +3146,8 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
                    AudioHandle::OutputBuffer out,
                    size_t                    size)
 {
+    audioLoadMeter.OnBlockStart();
+
     /* Enforce FZ+DN in ISR context (belt-and-suspenders for FPDSCR) */
     __asm volatile("VMRS r0, FPSCR\n"
                    "ORR  r0, r0, #(1<<24)|(1<<25)\n"
@@ -3042,18 +3167,23 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
                 if(tonePhase > 2.0f * 3.14159265f) tonePhase -= 2.0f * 3.14159265f;
                 toneSamples++;
             }
+            audioLoadMeter.OnBlockEnd();
             return;
         }
     }
 
     for(size_t i = 0; i < size; i++) out[0][i] = out[1][i] = 0.0f;
 
-    if(kAudioSafeMode)
+    if(kAudioSafeMode){
+        audioLoadMeter.OnBlockEnd();
         return;
+    }
 
     /* ── Kit loading: output silence to avoid SDRAM bus contention / data races ── */
-    if(kitMuteActive)
+    if(kitMuteActive){
+        audioLoadMeter.OnBlockEnd();
         return;
+    }
 
     float mixPeak = 0.0f;
 
@@ -3133,7 +3263,7 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
             else if(trkLfoWave[t] == LFO_WAVE_SH)
                 v = trkLfoSH[t];
             else
-                v = sinf(2.0f * (float)M_PI * trkLfoPhase[t]);
+                v = __fast_sinf(2.0f * (float)M_PI * trkLfoPhase[t]);
 
             lfoVal[t] = v * trkLfoDepth[t];
         }
@@ -3172,6 +3302,16 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
                          ? sampleStorage[p][idx + 1] / 32768.0f : 0.0f;
             float s    = s0 + frac * (s1 - s0);
 
+            /* ── Steal fade-out (5 ms exponential) ── */
+            if(vx.stealPending){
+                vx.stealFade *= STEAL_FADE_COEF;
+                if(vx.stealFade < STEAL_FADE_FLOOR){
+                    vx.active = false;
+                    vx.stealPending = false;
+                    continue;
+                }
+            }
+
             /* ── Voice AD envelope ── */
             if(vx.envStage == 0){
                 vx.env += vx.envAttackInc;
@@ -3186,7 +3326,7 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
                     continue;
                 }
             }
-            s *= vx.env;
+            s *= vx.env * vx.stealFade;
 
             /* ── Stutter ── */
             if(padStutterOn[p]){
@@ -3299,7 +3439,10 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
                 if(trkLfoActive[p] && trkLfoTarget[p] == LFO_TGT_ECHO_TIME)
                     rawDelay = clampF(rawDelay * (1.0f + 0.4f * lfoVal[p]), 1.f, (float)(TRACK_ECHO_SIZE-1));
                 uint32_t d = (uint32_t)rawDelay;
-                if(d==0) d=1; if(d>=TRACK_ECHO_SIZE) d=TRACK_ECHO_SIZE-1;
+                if(d == 0)
+                    d = 1;
+                if(d >= TRACK_ECHO_SIZE)
+                    d = TRACK_ECHO_SIZE - 1;
                 uint32_t rp = (trkEchoWp[p] + TRACK_ECHO_SIZE - d) % TRACK_ECHO_SIZE;
                 float delayed = trkEchoBuf[p][rp];
                 trkEchoBuf[p][trkEchoWp[p]] = clampF(s + delayed*trkEchoFb[p], -1.f, 1.f);
@@ -3329,7 +3472,7 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
                 else                     trkCompEnv[p] -= (trkCompEnv[p] - absS) * 0.03f;
                 if(trkCompEnv[p] > trkCompThresh[p] && trkCompEnv[p] > 0.001f){
                     float g = trkCompThresh[p] / trkCompEnv[p];
-                    g = powf(g, trkCompExp[p]);
+                    g = fast_powf(g, trkCompExp[p]);
                     if(g < 0.125f) g = 0.125f;
                     s *= g;
                 }
@@ -3428,7 +3571,10 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
             /* echo */
             if(trkEchoActive[t]){
                 uint32_t d = (uint32_t)trkEchoDelay[t];
-                if(d==0) d=1; if(d>=TRACK_ECHO_SIZE) d=TRACK_ECHO_SIZE-1;
+                if(d == 0)
+                    d = 1;
+                if(d >= TRACK_ECHO_SIZE)
+                    d = TRACK_ECHO_SIZE - 1;
                 uint32_t rpe = (trkEchoWp[t] + TRACK_ECHO_SIZE - d) % TRACK_ECHO_SIZE;
                 float delayed = trkEchoBuf[t][rpe];
                 trkEchoBuf[t][trkEchoWp[t]] = clampF(s + delayed*trkEchoFb[t], -1.f, 1.f);
@@ -3456,7 +3602,7 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
                 else                     trkCompEnv[t] -= (trkCompEnv[t] - absS) * 0.03f;
                 if(trkCompEnv[t] > trkCompThresh[t] && trkCompEnv[t] > 0.001f){
                     float g = trkCompThresh[t] / trkCompEnv[t];
-                    g = powf(g, trkCompExp[t]);
+                    g = fast_powf(g, trkCompExp[t]);
                     if(g < 0.125f) g = 0.125f;
                     s *= g;
                 }
@@ -3786,6 +3932,7 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
         if(pk > mixPeak) mixPeak = pk;
     }
     masterPeak = mixPeak;
+    audioLoadMeter.OnBlockEnd();
 }
 
 /* ═══════════════════════════════════════════════════════════════════
@@ -4670,6 +4817,10 @@ static void ProcessCommand()
             uint8_t pad = p[0];
             if(pad < MAX_PADS){
                 uint32_t ts = 0; memcpy(&ts, p + 8, 4);
+                StopPadVoices(pad);
+                padLoading[pad] = true;
+                if(ts > MAX_SAMPLE_BYTES / 2)
+                    ts = MAX_SAMPLE_BYTES / 2;
                 sampleTotalSamples[pad] = ts;
                 sampleLength[pad] = 0;
                 sampleLoaded[pad] = false;
@@ -4685,31 +4836,52 @@ static void ProcessCommand()
             memcpy(&offset,    p + 4, 4);
             uint32_t startSample = offset / 2;
             uint16_t numSamples  = chunkSize / 2;
-            if(pad < MAX_PADS && startSample + numSamples <= MAX_SAMPLE_BYTES / 2)
+            if(pad < MAX_PADS && padLoading[pad]
+               && (chunkSize & 1u) == 0
+               && len >= (uint16_t)(8u + chunkSize)
+                    && startSample + numSamples <= MAX_SAMPLE_BYTES / 2){
                 memcpy(&sampleStorage[pad][startSample], p + 8, chunkSize);
+                }
         }
         break;
 
     case CMD_SAMPLE_END:
         if(len >= 1){
             uint8_t pad = p[0];
-            if(pad < MAX_PADS){
-                sampleLength[pad] = sampleTotalSamples[pad];
-                sampleLoaded[pad] = true;
+            uint8_t status = (len >= 2) ? p[1] : 0;
+            if(pad < MAX_PADS && padLoading[pad]){
+                StopPadVoices(pad);
+                if(status == 0 && sampleTotalSamples[pad] > 0){
+                    if(sampleTotalSamples[pad] > MAX_SAMPLE_BYTES / 2)
+                        sampleTotalSamples[pad] = MAX_SAMPLE_BYTES / 2;
+                    sampleLength[pad] = sampleTotalSamples[pad];
+                    sampleLoaded[pad] = true;
+                } else {
+                    sampleLength[pad] = 0;
+                    sampleLoaded[pad] = false;
+                }
+                padLoading[pad] = false;
             }
         }
         break;
 
     case CMD_SAMPLE_UNLOAD:
         if(len >= 1 && p[0] < MAX_PADS){
-            sampleLoaded[p[0]] = false;
-            sampleLength[p[0]] = 0;
+            uint8_t pad = p[0];
+            StopPadVoices(pad);
+            padLoading[pad] = false;
+            sampleLoaded[pad] = false;
+            sampleLength[pad] = 0;
+            sampleTotalSamples[pad] = 0;
         }
         break;
 
     case CMD_SAMPLE_UNLOAD_ALL:
         for(int i = 0; i < MAX_PADS; i++){
-            sampleLoaded[i] = false; sampleLength[i] = 0;
+            padLoading[i] = false;
+            sampleLoaded[i] = false;
+            sampleLength[i] = 0;
+            sampleTotalSamples[i] = 0;
         }
         for(int v = 0; v < MAX_VOICES; v++) voices[v].active = false;
         break;
@@ -4732,7 +4904,7 @@ static void ProcessCommand()
                 bool isFamily = (nlen <= 2);
                 bool isXtra   = (strcasecmp(fno.fname, "xtra") == 0);
                 if(!isFamily && !isXtra && resp.count < 16){
-                    strncpy(resp.kits[resp.count], fno.fname, 31);
+                    CopyFixedString(resp.kits[resp.count], sizeof(resp.kits[resp.count]), fno.fname);
                     resp.count++;
                 }
             }
@@ -4749,7 +4921,8 @@ static void ProcessCommand()
             memcpy(&lk, p, sizeof(lk));
             lk.kitName[31] = 0;
             char path[96];
-            snprintf(path, sizeof(path), "%s/%s", SD_DATA_ROOT, lk.kitName);
+            if(!JoinPath(path, sizeof(path), SD_DATA_ROOT, lk.kitName))
+                break;
             DIR dir; FILINFO fno;
             uint8_t padIdx = lk.startPad;
             uint8_t maxIdx = lk.startPad + lk.maxPads;
@@ -4772,7 +4945,7 @@ static void ProcessCommand()
                         if(pad < 0 || pad >= 16 || padUsed[pad]) continue;
 
                         char fpath[160];
-                        snprintf(fpath, sizeof(fpath), "%s/%s", path, fno.fname);
+                        if(!JoinPath(fpath, sizeof(fpath), path, fno.fname)) continue;
                         if(LoadWavToPad(fpath, (uint8_t)pad))
                             padUsed[pad] = true;
                     }
@@ -4782,7 +4955,7 @@ static void ProcessCommand()
                         if(fno.fattrib & AM_DIR) continue;
                         if(!isWavFile(fno.fname)) continue;
                         char fpath[160];
-                        snprintf(fpath, sizeof(fpath), "%s/%s", path, fno.fname);
+                        if(!JoinPath(fpath, sizeof(fpath), path, fno.fname)) continue;
                         if(LoadWavToPad(fpath, padIdx)) padIdx++;
                     }
                 }
@@ -4793,8 +4966,7 @@ static void ProcessCommand()
                     padIdx = 16;
                 }
 
-                strncpy(currentKitName, lk.kitName, 31);
-                currentKitName[31] = 0;
+                CopyFixedString(currentKitName, sizeof(currentKitName), lk.kitName);
                 hw.PrintLine("SD: Kit '%s' loaded pads %d-%d",
                                lk.kitName, lk.startPad, padIdx-1);
                 /* Notify Master */
@@ -4822,7 +4994,7 @@ static void ProcessCommand()
         resp.present = sdPresent ? 1 : 0;
         for(int i = 0; i < MAX_PADS && i < 16; i++)
             if(sampleLoaded[i]) resp.samplesLoaded |= (1 << i);
-        strncpy(resp.currentKit, currentKitName, 31);
+        CopyFixedString(resp.currentKit, sizeof(resp.currentKit), currentKitName);
         BuildResponse(CMD_SD_STATUS, hdr->sequence,
                       (uint8_t*)&resp, sizeof(resp));
         return;
@@ -4853,7 +5025,7 @@ static void ProcessCommand()
         if(sdPresent && f_opendir(&dir, SD_DATA_ROOT) == FR_OK){
             while(f_readdir(&dir, &fno) == FR_OK && fno.fname[0] != 0){
                 if((fno.fattrib & AM_DIR) && resp.count < 16){
-                    strncpy(resp.kits[resp.count], fno.fname, 31);
+                    CopyFixedString(resp.kits[resp.count], sizeof(resp.kits[resp.count]), fno.fname);
                     resp.count++;
                 }
             }
@@ -4873,7 +5045,10 @@ static void ProcessCommand()
             memcpy(&pl, p, sizeof(pl));
             pl.folder[31] = 0;
             char path[96];
-            snprintf(path, sizeof(path), "%s/%s", SD_DATA_ROOT, pl.folder);
+            if(!JoinPath(path, sizeof(path), SD_DATA_ROOT, pl.folder)){
+                BuildResponse(CMD_SD_LIST_FILES, hdr->sequence, (uint8_t*)&resp, 1);
+                return;
+            }
             DIR dir; FILINFO fno;
             if(sdPresent && f_opendir(&dir, path) == FR_OK){
                 while(f_readdir(&dir, &fno) == FR_OK && fno.fname[0] != 0
@@ -4883,7 +5058,7 @@ static void ProcessCommand()
                     if(flen < 4) continue;
                     const char* ext = fno.fname + flen - 4;
                     if(ext[0]=='.' && (ext[1]=='w'||ext[1]=='W')){
-                        strncpy(resp.files[resp.count], fno.fname, 31);
+                        CopyFixedString(resp.files[resp.count], sizeof(resp.files[resp.count]), fno.fname);
                         resp.count++;
                     }
                 }
@@ -4974,7 +5149,7 @@ static void ProcessCommand()
         /* Expanded: 20 bytes base + 1 byte eventCount + 32 bytes currentKit */
         uint8_t resp[54]; memset(resp, 0, sizeof(resp));
         resp[0] = ActiveVoices();
-        resp[1] = 0; /* CPU % — TODO: implement with DWT */
+        resp[1] = AudioCpuPercent();
         /* resp[2-3]: loaded bitmask pads 0-15 */
         for(int i = 0; i < 8; i++)
             if(sampleLoaded[i]) resp[2] |= (1 << i);
@@ -4996,7 +5171,7 @@ static void ProcessCommand()
         /* resp[13]: spiRingDrops (bytes perdidos por ring buffer lleno) */
         resp[13] = (uint8_t)(spiRingDrops > 255 ? 255 : spiRingDrops);
         /* resp[14-45]: currentKitName (32 chars) */
-        strncpy((char*)(resp + 14), currentKitName, 31);
+        CopyFixedString((char*)(resp + 14), 32, currentKitName);
         /* resp[46-53]: total loaded sample count + total sample bytes (info) */
         uint8_t totalLoaded = 0;
         uint32_t totalBytes = 0;
@@ -5016,8 +5191,10 @@ static void ProcessCommand()
     }
 
     case CMD_GET_CPU_LOAD: {
-        uint8_t pct = 0; /* TODO: real measurement */
-        BuildResponse(CMD_GET_CPU_LOAD, hdr->sequence, &pct, 1);
+        CpuLoadResponse resp;
+        resp.cpuLoad = (float)AudioCpuPercent();
+        resp.uptime = hw.system.GetNow();
+        BuildResponse(CMD_GET_CPU_LOAD, hdr->sequence, (const uint8_t*)&resp, sizeof(resp));
         return;
     }
 
@@ -5401,29 +5578,47 @@ static void ProcessCommand()
 
     case CMD_BULK_FX:
         if(len >= 1){
-            uint8_t cnt = p[0]; uint16_t off = 1;
+            uint8_t bulkPayload[RX_BUF_SIZE - 8];
+            uint8_t savedPacket[RX_BUF_SIZE];
+            uint16_t savedPacketLen = 8 + len;
+            if(len > sizeof(bulkPayload) || savedPacketLen > sizeof(savedPacket))
+                break;
+
+            memcpy(bulkPayload, p, len);
+            memcpy(savedPacket, rxBuf, savedPacketLen);
+            bool savedPendingResponse = pendingResponse;
+            uint16_t savedPendingTxLen = pendingTxLen;
+
+            uint8_t cnt = bulkPayload[0];
+            uint16_t off = 1;
             for(uint8_t j = 0; j < cnt; j++){
                 if(off + 2 > len) break;
-                uint8_t subCmd = p[off]; uint8_t subLen = p[off+1]; off += 2;
+                uint8_t subCmd = bulkPayload[off];
+                uint8_t subLen = bulkPayload[off + 1];
+                off += 2;
                 if(off + subLen > len) break;
-                /* Build temp header + process */
-                SPIPacketHeader tmpHdr;
-                tmpHdr.magic = SPI_MAGIC_CMD;
-                tmpHdr.cmd = subCmd;
-                tmpHdr.length = subLen;
-                tmpHdr.sequence = hdr->sequence;
-                tmpHdr.checksum = crc16(p + off, subLen);
-                /* Temporarily swap rxBuf content for recursive processing */
-                uint8_t savedCmd = hdr->cmd;
-                hdr->cmd = subCmd;
-                hdr->length = subLen;
-                /* Move sub-payload to p+8 position (it's already at p+off) */
-                if(off != 8) memmove(rxBuf + 8, p + off, subLen);
-                hdr->cmd = savedCmd;
-                hdr->length = len;
-                /* Simple inline: just call the sub-handler directly */
+
+                if(subCmd == CMD_BULK_FX){
+                    off += subLen;
+                    continue;
+                }
+
+                SPIPacketHeader* subHdr = (SPIPacketHeader*)rxBuf;
+                subHdr->magic = SPI_MAGIC_CMD;
+                subHdr->cmd = subCmd;
+                subHdr->length = subLen;
+                subHdr->sequence = hdr->sequence;
+                subHdr->checksum = crc16(bulkPayload + off, subLen);
+                if(subLen > 0)
+                    memcpy(rxBuf + 8, bulkPayload + off, subLen);
+                pendingResponse = false;
+                pendingTxLen = 0;
+                ProcessCommand();
+                pendingResponse = savedPendingResponse;
+                pendingTxLen = savedPendingTxLen;
                 off += subLen;
             }
+            memcpy(rxBuf, savedPacket, savedPacketLen);
         }
         break;
 
@@ -5433,7 +5628,7 @@ static void ProcessCommand()
     case CMD_DSQ_UPLOAD_TRACK:
         /* [pat(1), trk(1), stepCount(1), rsvd(1)] + stepCount × DsqStepPkt(4) */
         if(len >= 4){
-            uint8_t pat  = p[0] & 7;
+            uint8_t pat  = p[0] % DSQ_PATTERNS;
             uint8_t trk  = p[1] & 15;
             uint8_t cnt  = p[2];
             if(cnt > DSQ_MAX_STEPS) cnt = DSQ_MAX_STEPS;
@@ -5452,7 +5647,7 @@ static void ProcessCommand()
     case CMD_DSQ_SET_STEP:
         /* [pat,trk,step,active,vel,div,prob,rsvd] */
         if(len >= 8){
-            uint8_t pat  = p[0] & 7;
+            uint8_t pat  = p[0] % DSQ_PATTERNS;
             uint8_t trk  = p[1] & 15;
             uint8_t step = p[2];
             if(step < DSQ_MAX_STEPS){
@@ -5483,7 +5678,7 @@ static void ProcessCommand()
         break;
 
     case CMD_DSQ_SELECT_PATTERN:
-        if(len >= 1) dseq.currentPattern = p[0] & 7;
+        if(len >= 1) dseq.currentPattern = p[0] % DSQ_PATTERNS;
         break;
 
     case CMD_DSQ_SET_LENGTH:
@@ -5504,7 +5699,7 @@ static void ProcessCommand()
             uint8_t resp[4] = {
                 (uint8_t)((dseq.currentStep < 0) ? 0 : (uint8_t)dseq.currentStep),
                 dseq.currentPattern,
-                dseq.playing ? 1u : 0u,
+                (uint8_t)(dseq.playing ? 1u : 0u),
                 0
             };
             BuildResponse(CMD_DSQ_GET_POS, hdr->sequence, resp, sizeof(resp));
@@ -5518,7 +5713,7 @@ static void ProcessCommand()
     case CMD_DSQ_SET_PARAM_LOCK:
         /* [pat,trk,step, cutoffEn,cutHi,cutLo, reverbEn,reverb, volEn,vol, rsvd,rsvd] */
         if(len >= 12){
-            uint8_t pat  = p[0] & 7;
+            uint8_t pat  = p[0] % DSQ_PATTERNS;
             uint8_t trk  = p[1] & 15;
             uint8_t step = p[2];
             if(step < DSQ_MAX_STEPS){
@@ -5658,7 +5853,7 @@ static void ProcessCommand()
             uint8_t cnt = p[0];
             if(cnt > SONG_MAX_ENTRIES) cnt = SONG_MAX_ENTRIES;
             for(uint8_t si = 0; si < cnt && (1 + si*2 + 2) <= len; si++){
-                songChain[si].pattern = p[1 + si*2] & 7;
+                songChain[si].pattern = p[1 + si*2] % DSQ_PATTERNS;
                 songChain[si].repeats = p[2 + si*2];
                 if(songChain[si].repeats == 0) songChain[si].repeats = 1;
             }
@@ -5730,7 +5925,6 @@ static void ProcessCommand()
 
 static uint8_t  parseBuf[RX_BUF_SIZE];
 static uint16_t parseIdx = 0;
-static uint16_t rxReadPtr = 0;
 static volatile bool spiTxPending = false;
 static volatile uint32_t spiSlvIsrCnt = 0;
 
@@ -5842,6 +6036,7 @@ static void InitSpi1Slave()
  * ═══════════════════════════════════════════════════════════════════ */
 
 /* NO usamos variable separada — DMA siempre escribe en rxBuf[pos] */
+#if RED808_ENABLE_UART_LEGACY
 static volatile uint16_t uartAccumIdx;    /* siguiente posición en rxBuf */
 static volatile uint16_t uartExpectedLen; /* bytes totales a acumular    */
 
@@ -5939,6 +6134,7 @@ static void UartRxByteCb(void* ctx, UartHandler::Result res)
         break;
     }
 }
+#endif
 
 /* ═══════════════════════════════════════════════════════════════════
  *  25. SD CARD INIT (SPI3 master) + AUTO-LOAD
@@ -5987,58 +6183,75 @@ static bool LoadWavToPad(const char* filepath, uint8_t padIdx)
 {
     if(padIdx >= MAX_PADS) return false;
 
-    /* Mark pad as loading — AudioCallback will skip this pad entirely */
+    bool ok = false;
+    bool opened = false;
+    FIL fil;
+    UINT br = 0;
+    uint8_t hdr[44];
+    uint16_t ch = 0;
+    uint16_t bps = 0;
+    uint32_t sr = 0;
+    uint32_t pos = 0;
+    uint32_t dataSize = 0;
+    uint32_t bytesPerFrame = 0;
+    uint32_t totalFrames = 0;
+
+    StopPadVoices(padIdx);
     sampleLoaded[padIdx] = false;
     sampleLength[padIdx] = 0;
+    sampleTotalSamples[padIdx] = 0;
     padLoading[padIdx] = true;
 
-    FIL fil;
-    if(f_open(&fil, filepath, FA_READ) != FR_OK){
-        padLoading[padIdx] = false;
-        return false;
-    }
+    if(f_open(&fil, filepath, FA_READ) != FR_OK)
+        goto done;
+    opened = true;
 
     /* Simple WAV header parse: find "data" chunk */
-    uint8_t hdr[44];
-    UINT br;
-    if(f_read(&fil, hdr, 44, &br) != FR_OK || br < 44){
-        f_close(&fil); return false;
-    }
-    if(memcmp(hdr, "RIFF", 4) != 0 || memcmp(hdr+8, "WAVE", 4) != 0){
-        f_close(&fil); return false;
-    }
+    if(f_read(&fil, hdr, 44, &br) != FR_OK || br < 44)
+        goto done;
+    if(memcmp(hdr, "RIFF", 4) != 0 || memcmp(hdr+8, "WAVE", 4) != 0)
+        goto done;
 
-    uint16_t ch  = hdr[22] | (hdr[23]<<8);
-    uint32_t sr  = hdr[24]|(hdr[25]<<8)|(hdr[26]<<16)|(hdr[27]<<24);
-    uint16_t bps = hdr[34] | (hdr[35]<<8);
+    ch  = hdr[22] | (hdr[23]<<8);
+    sr  = hdr[24]|(hdr[25]<<8)|(hdr[26]<<16)|(hdr[27]<<24);
+    bps = hdr[34] | (hdr[35]<<8);
     (void)sr;
 
+    if(ch == 0 || ch > 2 || (bps != 8 && bps != 16 && bps != 24))
+        goto done;
+
     /* Skip to data chunk */
-    uint32_t pos = 12;
+    pos = 12;
     f_lseek(&fil, 12);
-    uint32_t dataSize = 0;
-    while(pos < f_size(&fil) - 8){
+    dataSize = 0;
+    while(pos + 8 <= f_size(&fil)){
         uint8_t ck[8];
         if(f_read(&fil, ck, 8, &br) != FR_OK || br < 8) break;
         uint32_t ckSz = ck[4]|(ck[5]<<8)|(ck[6]<<16)|(ck[7]<<24);
+        if(f_tell(&fil) + ckSz > f_size(&fil))
+            break;
         if(memcmp(ck, "data", 4) == 0){
             dataSize = ckSz;
             break;
         }
-        f_lseek(&fil, f_tell(&fil) + ckSz);
+        f_lseek(&fil, f_tell(&fil) + ckSz + (ckSz & 1u));
         pos += 8 + ckSz;
+        if(ckSz & 1u) pos++;
     }
-    if(dataSize == 0){ f_close(&fil); return false; }
+    if(dataSize == 0)
+        goto done;
 
-    uint32_t bytesPerFrame = (bps/8) * ch;
-    if(bytesPerFrame == 0){ f_close(&fil); return false; }
-    uint32_t totalFrames = dataSize / bytesPerFrame;
+    bytesPerFrame = (bps/8) * ch;
+    if(bytesPerFrame == 0)
+        goto done;
+    totalFrames = dataSize / bytesPerFrame;
     if(totalFrames > MAX_SAMPLE_BYTES / 2) totalFrames = MAX_SAMPLE_BYTES / 2;
 
     /* Read and convert to mono 16-bit */
     if(bps == 16 && ch == 1){
         /* Optimal: direct read */
-        f_read(&fil, sampleStorage[padIdx], totalFrames * 2, &br);
+        if(f_read(&fil, sampleStorage[padIdx], totalFrames * 2, &br) != FR_OK)
+            goto done;
         sampleLength[padIdx] = br / 2;
     } else {
         /* Convert: read in chunks */
@@ -6073,10 +6286,22 @@ static bool LoadWavToPad(const char* filepath, uint8_t padIdx)
         sampleLength[padIdx] = frames;
     }
 
+    sampleTotalSamples[padIdx] = sampleLength[padIdx];
     sampleLoaded[padIdx] = (sampleLength[padIdx] > 0);
+
+    ok = sampleLoaded[padIdx];
+
+done:
+    if(!ok){
+        StopPadVoices(padIdx);
+        sampleLoaded[padIdx] = false;
+        sampleLength[padIdx] = 0;
+        sampleTotalSamples[padIdx] = 0;
+    }
     padLoading[padIdx] = false;
-    f_close(&fil);
-    return sampleLoaded[padIdx];
+    if(opened)
+        f_close(&fil);
+    return ok;
 }
 
 /* ── Helper: case-insensitive substring match ─────────────────── */
@@ -6141,8 +6366,7 @@ static bool LoadFirstWavFromFolderToPad(const char* folderPath, uint8_t padIdx)
         if(!isWavFile(fno.fname)) continue;
 
         if(!found || compareCI(fno.fname, bestName) < 0){
-            strncpy(bestName, fno.fname, sizeof(bestName) - 1);
-            bestName[sizeof(bestName) - 1] = 0;
+            CopyFixedString(bestName, sizeof(bestName), fno.fname);
             found = true;
         }
     }
@@ -6152,7 +6376,8 @@ static bool LoadFirstWavFromFolderToPad(const char* folderPath, uint8_t padIdx)
         return false;
 
     char fpath[192];
-    snprintf(fpath, sizeof(fpath), "%s/%s", folderPath, bestName);
+    if(!JoinPath(fpath, sizeof(fpath), folderPath, bestName))
+        return false;
     return LoadWavToPad(fpath, padIdx);
 }
 
@@ -6166,7 +6391,8 @@ static uint8_t FillMissingCanonicalPadsFromFamilies(uint8_t startPad, uint8_t ma
         if(sampleLoaded[pad]) continue;
 
         char famPath[96];
-        snprintf(famPath, sizeof(famPath), "%s/%s", SD_DATA_ROOT, PAD_FAMILY_NAMES[pad]);
+        if(!JoinPath(famPath, sizeof(famPath), SD_DATA_ROOT, PAD_FAMILY_NAMES[pad]))
+            continue;
         if(LoadFirstWavFromFolderToPad(famPath, pad))
             filled++;
     }
@@ -6189,7 +6415,8 @@ static void AutoLoadFromSD()
 
     for(int k = 0; defaultKitNames[k]; k++){
         char kitPath[96];
-        snprintf(kitPath, sizeof(kitPath), "%s/%s", SD_DATA_ROOT, defaultKitNames[k]);
+        if(!JoinPath(kitPath, sizeof(kitPath), SD_DATA_ROOT, defaultKitNames[k]))
+            continue;
         DIR dir;
         if(f_opendir(&dir, kitPath) != FR_OK) continue;
 
@@ -6203,7 +6430,7 @@ static void AutoLoadFromSD()
             int pad = GuessPadFromFilename(fno.fname);
             if(pad >= 0 && pad < 16 && !padUsed[pad]){
                 char fpath[192];
-                snprintf(fpath, sizeof(fpath), "%s/%s", kitPath, fno.fname);
+                if(!JoinPath(fpath, sizeof(fpath), kitPath, fno.fname)) continue;
                 if(LoadWavToPad(fpath, (uint8_t)pad)){
                     padUsed[pad] = true;
                     loaded++;
@@ -6228,7 +6455,7 @@ static void AutoLoadFromSD()
         }
 
         if(loaded > 0){
-            strncpy(currentKitName, defaultKitNames[k], 31);
+            CopyFixedString(currentKitName, sizeof(currentKitName), defaultKitNames[k]);
             hw.PrintLine("SD: Loaded %d LIVE PADS from '%s'",
                            loaded, defaultKitNames[k]);
             /* Build pad mask for event */
@@ -6251,7 +6478,7 @@ static void AutoLoadFromSD()
                 if(strlen(fno.fname) <= 2) continue;  /* skip family folders */
                 if(strcasecmp(fno.fname, "xtra") == 0) continue;
                 char kitPath[96];
-                snprintf(kitPath, sizeof(kitPath), "%s/%s", SD_DATA_ROOT, fno.fname);
+                if(!JoinPath(kitPath, sizeof(kitPath), SD_DATA_ROOT, fno.fname)) continue;
                 DIR kdir; FILINFO kfno;
                 uint8_t padIdx = 0;
                 if(f_opendir(&kdir, kitPath) == FR_OK){
@@ -6260,13 +6487,13 @@ static void AutoLoadFromSD()
                         if(kfno.fattrib & AM_DIR) continue;
                         if(!isWavFile(kfno.fname)) continue;
                         char fpath[192];
-                        snprintf(fpath, sizeof(fpath), "%s/%s", kitPath, kfno.fname);
+                        if(!JoinPath(fpath, sizeof(fpath), kitPath, kfno.fname)) continue;
                         if(LoadWavToPad(fpath, padIdx)) padIdx++;
                     }
                     f_closedir(&kdir);
                 }
                 if(padIdx > 0){
-                    strncpy(currentKitName, fno.fname, 31);
+                    CopyFixedString(currentKitName, sizeof(currentKitName), fno.fname);
                     hw.PrintLine("SD: Fallback loaded %d LIVE PADS from '%s'",
                                    padIdx, fno.fname);
                     uint32_t fbMask = 0;
@@ -6301,7 +6528,7 @@ static void AutoLoadFromSD()
                 if(fno.fattrib & AM_DIR) continue;
                 if(!isWavFile(fno.fname)) continue;
                 char fpath[160];
-                snprintf(fpath, sizeof(fpath), "%s/%s", xtraPath, fno.fname);
+                if(!JoinPath(fpath, sizeof(fpath), xtraPath, fno.fname)) continue;
                 if(LoadWavToPad(fpath, xtraIdx)) xtraIdx++;
             }
             f_closedir(&dir);
@@ -6563,6 +6790,7 @@ int main()
 
     hw.SetAudioBlockSize(AUDIO_BLOCK);
     hw.SetAudioSampleRate(SaiHandle::Config::SampleRate::SAI_48KHZ);
+    audioLoadMeter.Init(hw.AudioSampleRate(), hw.AudioBlockSize());
 
     auto Log = [&](const char* fmt, auto... args)
     {
@@ -6720,6 +6948,7 @@ int main()
             InitSpi1Slave();
             Log("SPI1 SLAVE listo (D7=CS D8=SCK D9=MISO D10=MOSI)");
         }
+#if RED808_ENABLE_UART_LEGACY
         else
         {
             /* ── UART1 legacy (comunicación con ESP32-S3) ──
@@ -6738,6 +6967,7 @@ int main()
             UartStartScan();
             Log("UART1 listo (D29=TX D30=RX, ESP32: TX->D30 RX->D29)");
         }
+#endif
     }
     else
     {
@@ -6844,6 +7074,7 @@ int main()
         }
 
         /* ━━━━━ UART1 legacy transport ━━━━━ */
+#if RED808_ENABLE_UART_LEGACY
         if(kEnableSpiSlave && !kUseSpiTransport && pendingResponse)
         {
             pendingResponse = false;
@@ -6851,6 +7082,7 @@ int main()
             System::Delay(1);
             UartStartScan();
         }
+#endif
 
         /* ── LED diagnóstico ── */
         uint32_t now = hw.system.GetNow();

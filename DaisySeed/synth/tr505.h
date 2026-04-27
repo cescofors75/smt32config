@@ -1057,11 +1057,16 @@ public:
 
     uint8_t ActiveCount() const {
         uint8_t c = 0;
-        if (kick.IsActive())    c++; if (snare.IsActive())   c++;
-        if (clap.IsActive())    c++; if (hihatC.IsActive())  c++;
-        if (hihatO.IsActive())  c++; if (lowTom.IsActive())  c++;
-        if (midTom.IsActive())  c++; if (hiTom.IsActive())   c++;
-        if (cowbell.IsActive()) c++; if (cymbal.IsActive())  c++;
+        if (kick.IsActive())    c++;
+        if (snare.IsActive())   c++;
+        if (clap.IsActive())    c++;
+        if (hihatC.IsActive())  c++;
+        if (hihatO.IsActive())  c++;
+        if (lowTom.IsActive())  c++;
+        if (midTom.IsActive())  c++;
+        if (hiTom.IsActive())   c++;
+        if (cowbell.IsActive()) c++;
+        if (cymbal.IsActive())  c++;
         if (rimshot.IsActive()) c++;
         return c;
     }

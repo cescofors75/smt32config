@@ -203,8 +203,7 @@ public:
         float w2 = w * w;
         float w3 = w2 * w;
         float w4 = w3 * w;
-        /* Butterworth-inspired approximation */
-        float norm = 1.0f / (1.0f + 1.8730f*w + 0.4955f*w2 - 0.0863f*w3 + 0.0049f*w4);
+        (void)w4;
         /* Simplified: use 1-pole coef, good enough for musical use */
         float fc_norm = Clamp(cutoff_ / sr_, 0.0f, 0.49f);
         /* Moog formula: g = e^(-2π fc/fs) converted */

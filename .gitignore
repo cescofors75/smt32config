@@ -1,0 +1,4 @@
+DaisySeed/build/
+DaisySeed/*.log
+DaisySeed/build_*.txt
+flash_daisy_script_log.txt
