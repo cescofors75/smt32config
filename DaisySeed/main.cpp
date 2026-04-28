@@ -4077,6 +4077,11 @@ static void ProcessCommand()
             } else {
                 /* Modo sampler (por defecto) */
                 TriggerPad(pad, vel, 100, 0, 0, liveVolume);
+                /* DIAG: si no hay sample cargado, fallback a snare 808 (audible y distinto del kick)
+                 * Confirma que el problema es sampleLoaded=false, no el SPI. */
+                if(pad < MAX_PADS && !sampleLoaded[pad]){
+                    synth808.Trigger(TR808::INST_SNARE, clampF(vel / 127.0f, 0.1f, 1.0f));
+                }
             }
             spiLastTriggerMs = hw.system.GetNow();
         }
