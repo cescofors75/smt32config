@@ -1501,16 +1501,38 @@ static uint16_t synthActiveMask = 0x01FF;  /* all 9 engines active */
 
 /* ── Demo Mode ── */
 static Demo::DemoSequencer demoSeq;
-static constexpr bool kEnableSpiSlave = true;  /* modo integrado: comunicación con ESP32 master */
+#ifndef RED808_ENABLE_SPI_SLAVE
+#define RED808_ENABLE_SPI_SLAVE 1
+#endif
+#ifndef RED808_ENABLE_INIT_FX
+#define RED808_ENABLE_INIT_FX 1
+#endif
+static constexpr bool kEnableSpiSlave = (RED808_ENABLE_SPI_SLAVE != 0);  /* modo integrado: comunicación con ESP32 master */
 static constexpr bool kUseSpiTransport = true;  /* Daisy usa SPI1 slave; UART legacy queda fuera por macro */
 static constexpr bool kEnableSynth505 = true;  /* habilitado para demo completa de arranque */
 static constexpr bool kAudioSafeMode = false; /* callback de audio real */
-static constexpr bool kBootDiagMinimal = false; /* diagnóstico extremo: solo LED, sin audio ni FX */
+#ifndef RED808_BOOT_DIAG_MINIMAL
+#define RED808_BOOT_DIAG_MINIMAL 0
+#endif
+#ifndef RED808_AUDIO_DIAG_MINIMAL
+#define RED808_AUDIO_DIAG_MINIMAL 0
+#endif
+static constexpr bool kBootDiagMinimal = (RED808_BOOT_DIAG_MINIMAL != 0); /* diagnóstico extremo: solo LED, sin audio ni FX */
+static constexpr bool kAudioDiagMinimal = (RED808_AUDIO_DIAG_MINIMAL != 0); /* diagnóstico: solo audio callback + LED */
 static constexpr bool kEnableAudioStart = true; /* iniciar audio normal */
 static constexpr bool kEnableStartLog = true;  /* diagnóstico: ver log boot QSPI/muestras */
-static constexpr bool kEnableInitFx = true;    /* diagnóstico: reactivar InitFX para aislar causa */
-static constexpr bool kStartupToneTest = false; /* tono confirmado OK, desactivado */
-static constexpr bool kStartup808SelfTest = false; /* desactivado: arranque limpio, espera comandos del master */
+static constexpr bool kEnableInitFx = (RED808_ENABLE_INIT_FX != 0);    /* diagnóstico: reactivar InitFX para aislar causa */
+#ifndef RED808_STARTUP_TONE_TEST
+#define RED808_STARTUP_TONE_TEST 0
+#endif
+#ifndef RED808_STARTUP_808_SELF_TEST
+#define RED808_STARTUP_808_SELF_TEST 0
+#endif
+#ifndef RED808_STARTUP_TONE_SECONDS
+#define RED808_STARTUP_TONE_SECONDS 3
+#endif
+static constexpr bool kStartupToneTest = (RED808_STARTUP_TONE_TEST != 0); /* diagnóstico: tono directo 1kHz */
+static constexpr bool kStartup808SelfTest = (RED808_STARTUP_808_SELF_TEST != 0); /* diagnóstico: prueba sampler/synth */
 static constexpr bool kBypassIncomingCrc = false; /* producción: validar CRC de comandos entrantes */
 static constexpr bool kAcceptOneBasedPadIndex = false; /* ESP32 envía 0-based (pad 0=BD, 1=SD, etc.) */
 static constexpr bool kTriggerSynthOnLiveCmd = false; /* producción: no superponer synth al disparo de sampler */
@@ -3157,7 +3179,7 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
     if(kStartupToneTest){
         static uint32_t toneSamples = 0;
         static float    tonePhase   = 0.0f;
-        const  uint32_t toneDurSamp = (uint32_t)SAMPLE_RATE * 3;  /* 3 segundos */
+        const  uint32_t toneDurSamp = (uint32_t)SAMPLE_RATE * RED808_STARTUP_TONE_SECONDS;
         if(toneSamples < toneDurSamp){
             for(size_t i = 0; i < size; i++){
                 float s = 0.7f * sinf(tonePhase);
@@ -6783,8 +6805,20 @@ int main()
         {
             led = !led;
             hw.SetLed(led);
-            for(volatile uint32_t d = 0; d < 900000; ++d)
-                __asm__("nop");
+            System::Delay(125);
+        }
+    }
+
+    if(kAudioDiagMinimal)
+    {
+        hw.SetAudioBlockSize(AUDIO_BLOCK);
+        hw.SetAudioSampleRate(SaiHandle::Config::SampleRate::SAI_48KHZ);
+        hw.StartAudio(AudioCallback);
+        while(1)
+        {
+            const uint32_t now = hw.system.GetNow();
+            hw.SetLed(((now / 250u) & 1u) != 0u);
+            System::Delay(1);
         }
     }
 
@@ -6814,14 +6848,17 @@ int main()
     if(kEnableInitFx)
         InitFX();
 
-    /* ── Cargar WAVs desde QSPI Flash (blob en 0x90080000) → SDRAM ── */
+    /* ── Cargar WAVs desde QSPI Flash (blob en 0x900C0000) → SDRAM ── */
     {
-        /* El blob se flashea con pack_wavs.py + dfu-util a 0x90080000.
+        /* El blob se flashea con pack_wavs.py + dfu-util a 0x900C0000.
+         * IMPORTANTE: app vive en 0x90040000 (BOOT_SRAM copia 512KB a SRAM),
+         * por eso el blob empieza en 0x900C0000 (app+512KB) y NO en 0x90080000
+         * (que solo dejaba 256KB y el firmware ya pasa de ese tamaño).
          * Formato: magic "WAV\0"(4B) | ver(2B) | count(2B)
          *          entries[count]: padIdx(1B) | rsv(1B) | offset(4B) | size(4B)  [10 bytes]
          *          WAV files raw (con header) back-to-back, align 4
          * La QSPI es memory-mapped: leemos directamente como punteros. */
-        static const uint8_t* QSPI_SAMPLES = (const uint8_t*)0x90080000;
+        static const uint8_t* QSPI_SAMPLES = (const uint8_t*)0x900C0000;
         static const uint32_t QSPI_END_ADDR = 0x90800000;
         const uint8_t* blob = QSPI_SAMPLES;
         bool blobOk = (blob[0]=='W' && blob[1]=='A' && blob[2]=='V' && blob[3]==0);
@@ -7087,6 +7124,9 @@ int main()
         /* ── LED diagnóstico ── */
         uint32_t now = hw.system.GetNow();
         RunStartup808SelfTest(now);
-        hw.SetLed(now < uartLedPulseUntilMs);
+        if(kStartupToneTest)
+            hw.SetLed(((now / 125u) & 1u) != 0u);
+        else
+            hw.SetLed(now < uartLedPulseUntilMs);
     }
 }
