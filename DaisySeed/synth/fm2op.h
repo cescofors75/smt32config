@@ -26,7 +26,7 @@
  *    8   Ratio      [0.5..16.0]     modulador/carrier freq ratio
  *    9   Index      [0.0..20.0]     FM depth (modulation index)
  *    10  Feedback   [0.0..1.0]      modulator self-feedback
- *    11  Algorithm  0=M→C  1=M+C (additive)  2=C+C ring-mod
+ *    11  Algorithm  0=M→C  1=M+C  2=ring  3=FB-FM  4=parallel
  *    12  Detune     [-50..+50] cents desintonizacion carriersub//mod
  *    13  Velocity   sensitividad index con velocidad [0.0..1.0]
  *    14  Volume     [0.0..1.0]
@@ -132,7 +132,7 @@ struct Params {
     float    ratio   = 1.0f;      /* [0.5..16.0]  mod:car ratio   */
     float    index   = 3.0f;      /* [0.0..20.0]  FM depth        */
     float    feedback= 0.0f;      /* [0.0..1.0]   mod self-fb     */
-    uint8_t  algo    = 0;         /* 0=M→C 1=M+C  2=ring          */
+    uint8_t  algo    = 0;         /* 0=M→C 1=M+C 2=ring 3=fbFM 4=par */
     float    detune  = 0.0f;      /* [-50..+50] cents             */
     float    velSens = 0.7f;      /* [0.0..1.0] vel→index scale   */
 
@@ -153,6 +153,7 @@ public:
         carPhase_  = 0.0f;
         modPhase_  = 0.0f;
         modFbBuf_  = 0.0f;
+        carFbBuf_  = 0.0f;
         velocity_  = 1.0f;
         baseFreq_  = MidiToHz(60);
         carEnv_.Init(sr);
@@ -165,6 +166,7 @@ public:
         carPhase_  = 0.0f;
         modPhase_  = 0.0f;
         modFbBuf_  = 0.0f;
+        carFbBuf_  = 0.0f;
         active_    = true;
         carEnv_.Gate(true);
         modEnv_.Gate(true);
@@ -216,9 +218,19 @@ public:
                 output  = sinf(FM2OP_TWOPI * carPhase_) * 0.7f;
                 output += modOsc * effIndex * 0.3f;
                 break;
-            case 2: /* Ring modulation */
-                output = sinf(FM2OP_TWOPI * carPhase_) * modOsc;
+            case 2: /* Ring modulation — normalizado para igualar gain con M→C */
+                output = sinf(FM2OP_TWOPI * carPhase_) * modOsc * 1.4f;
                 break;
+            case 3: /* FB-FM: M→C con feedback del carrier al modulator (timbres metálicos) */
+                output = sinf(FM2OP_TWOPI * carPhase_ + effIndex * modOsc + carFbBuf_ * 0.3f);
+                carFbBuf_ = (carFbBuf_ * 0.7f) + (output * 0.3f);  /* lowpass del feedback */
+                break;
+            case 4: { /* Parallel: dos carriers en octavas (sub + main), modulados en paralelo */
+                float sub = sinf(FM2OP_TWOPI * carPhase_ * 0.5f + effIndex * modOsc * 0.5f);
+                float main = sinf(FM2OP_TWOPI * carPhase_ + effIndex * modOsc);
+                output = (main * 0.65f + sub * 0.35f);
+                break;
+            }
             default:
                 output = sinf(FM2OP_TWOPI * carPhase_ + effIndex * modOsc);
                 break;
@@ -250,7 +262,7 @@ public:
             case  8: params.ratio    = Clamp(val, 0.5f,   16.0f); break;
             case  9: params.index    = Clamp(val, 0.0f,   20.0f); break;
             case 10: params.feedback = Clamp(val, 0.0f,   1.0f);  break;
-            case 11: params.algo     = (uint8_t)Clamp(val, 0.0f, 2.0f); break;
+            case 11: params.algo     = (uint8_t)Clamp(val, 0.0f, 4.0f); break;
             case 12: params.detune   = Clamp(val, -50.0f, 50.0f); break;
             case 13: params.velSens  = Clamp(val, 0.0f,   1.0f);  break;
             case 14: params.volume   = Clamp(val, 0.0f,   1.0f);  break;
@@ -264,6 +276,7 @@ private:
     float    carPhase_ = 0.0f;
     float    modPhase_ = 0.0f;
     float    modFbBuf_ = 0.0f;
+    float    carFbBuf_ = 0.0f;  /* feedback del carrier para algo=3 */
     float    velocity_ = 1.0f;
     float    baseFreq_ = 261.63f;
     Adsr     carEnv_;

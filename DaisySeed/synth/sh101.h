@@ -268,6 +268,7 @@ struct Params {
     /* Global */
     float    portamento  = 0.0f;    /* [0.0..1.0]                      */
     float    drift       = 0.15f;   /* [0.0..1.0] analog instability   */
+    float    keyTrack    = 0.0f;    /* [0.0..1.0] VCF keyboard tracking */
     float    volume      = 0.8f;    /* [0.0..1.0]                      */
 };
 
@@ -418,11 +419,15 @@ public:
         float vcfEnvVal = vcfEnv_.Process(
             params.vcfAttack, params.vcfDecay, 0.0f, 0.02f);
 
-        /* Cutoff efectivo: params.cutoff + env mod + LFO mod */
+        /* Cutoff efectivo: params.cutoff + env mod + LFO mod + key tracking */
         float cutoffEff = params.cutoff;
         cutoffEff += vcfEnvVal * params.vcfEnvAmt * 4000.0f;
         if (params.lfoTarget == 1) {
             cutoffEff += lfoVal * params.lfoDepth * 2000.0f;
+        }
+        if (params.keyTrack > 0.001f) {
+            float octFromA3 = log2f(currentFreq_ * (1.0f / 220.0f));
+            cutoffEff += octFromA3 * params.keyTrack * 4500.0f;
         }
         cutoffEff = Clamp(cutoffEff, 20.0f, sr_ * 0.47f);
 
@@ -469,6 +474,7 @@ public:
             case 17: params.portamento = Clamp(val, 0.0f,  1.0f);  break;
             case 18: params.drift      = Clamp(val, 0.0f,  1.0f);  break;
             case 19: params.volume     = Clamp(val, 0.0f,  1.0f);  break;
+            case 20: params.keyTrack   = Clamp(val, 0.0f,  1.0f);  break;
         }
     }
 

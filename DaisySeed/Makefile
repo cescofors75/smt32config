@@ -44,5 +44,14 @@ DAISYSP_DIR  = ./DaisySP
 LIBS += -ldaisysp-lgpl
 LIBDIR += -L./DaisySP/DaisySP-LGPL/build
 
+# ── Stubs propios de syscalls ── evita warnings "_kill/_close/... is not implemented"
+# que emite libnosys (linkadas via --specs=nosys.specs en libdaisy/core/Makefile).
+C_SOURCES += syscalls_stubs.c
+
 SYSTEM_FILES_DIR = $(LIBDAISY_DIR)/core
 include $(SYSTEM_FILES_DIR)/Makefile
+
+# ── Silenciar warning RWX LOAD segment ──
+# El bootloader Daisy carga la app desde QSPI→SRAM, lo que requiere un segmento
+# RWX único; es esperado y seguro en este target embedded.
+LDFLAGS += -Wl,--no-warn-rwx-segments
