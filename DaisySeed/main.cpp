@@ -3680,19 +3680,20 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
             synthTobus(s, engTrk[SYNTH_ENGINE_505]);
         }
         if (synthActiveMask & (1 << SYNTH_ENGINE_303)){
-            float s = sanitizeF(acid303.Process()) * demoFadeGain;
+            /* v2.5: −4dB headroom en synths melódicos para no saturar el bus */
+            float s = sanitizeF(acid303.Process()) * demoFadeGain * 0.63f;
             synthTobus(s, engTrk[SYNTH_ENGINE_303]);
         }
         if (synthActiveMask & (1 << SYNTH_ENGINE_WTOSC)){
-            float s = sanitizeF(wtOsc.Process()) * demoFadeGain;
+            float s = sanitizeF(wtOsc.Process()) * demoFadeGain * 0.63f;
             synthTobus(s, engTrk[SYNTH_ENGINE_WTOSC]);
         }
         if (synthActiveMask & (1 << SYNTH_ENGINE_SH101)){  /* I1 */
-            float s = sanitizeF(synthSH101.Process()) * demoFadeGain;
+            float s = sanitizeF(synthSH101.Process()) * demoFadeGain * 0.63f;
             synthTobus(s, engTrk[SYNTH_ENGINE_SH101]);
         }
         if (synthActiveMask & (1 << SYNTH_ENGINE_FM2OP)){  /* I2 */
-            float s = sanitizeF(synthFM2Op.Process()) * demoFadeGain;
+            float s = sanitizeF(synthFM2Op.Process()) * demoFadeGain * 0.63f;
             synthTobus(s, engTrk[SYNTH_ENGINE_FM2OP]);
         }
         if (synthActiveMask & (1 << SYNTH_ENGINE_PHYS)){
@@ -5491,7 +5492,28 @@ static void ProcessCommand()
         break;
 
     case CMD_SYNTH_NOTE_OFF:
-        acid303.NoteOff();
+        /* v2.5: payload extendido [engine, track] para apagar el synth correcto.
+         * Sin payload: apaga TODOS los synths melódicos (panic legacy 303). */
+        if(len >= 2){
+            uint8_t engine = p[0];
+            uint8_t track  = p[1];
+            switch(engine){
+                case SYNTH_ENGINE_303:   acid303.NoteOff(); break;
+                case SYNTH_ENGINE_WTOSC:
+                    if(track < 16) wtOsc.NoteOff(trackWtNote[track]);
+                    else           wtOsc.AllNotesOff();
+                    break;
+                case SYNTH_ENGINE_SH101: synthSH101.NoteOff(); break;
+                case SYNTH_ENGINE_FM2OP: synthFM2Op.NoteOff(); break;
+                default: break;
+            }
+        } else {
+            /* Legacy: NoteOff genérico (compat firmware antiguo) */
+            acid303.NoteOff();
+            synthSH101.NoteOff();
+            synthFM2Op.NoteOff();
+            wtOsc.AllNotesOff();
+        }
         break;
 
     case CMD_SYNTH_303_PARAM:
