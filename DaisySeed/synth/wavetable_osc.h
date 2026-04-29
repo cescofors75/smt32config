@@ -66,10 +66,9 @@ enum WtWaveId : uint8_t {
 
 /* ─── LFO targets ────────────────────────────────────────────────── */
 enum WtLfoTarget : uint8_t {
-    WT_LFO_WAVE   = 0,
-    WT_LFO_PITCH  = 1,
-    WT_LFO_VOL    = 2,
-    WT_LFO_CUTOFF = 3,  /* modula filtro LP (±1 octava alrededor del cutoff) */
+    WT_LFO_WAVE  = 0,
+    WT_LFO_PITCH = 1,
+    WT_LFO_VOL   = 2,
 };
 
 /* ═══════════════════════════════════════════════════════════════════
@@ -230,9 +229,6 @@ public:
                     case WT_LFO_VOL:
                         vol_mod = WTOSC_CLAMP(1.0f + lfoVal, 0.0f, 1.5f);
                         break;
-                    case WT_LFO_CUTOFF:
-                        /* manejado fuera del bucle por voz (filtro compartido) */
-                        break;
                 }
             }
 
@@ -260,20 +256,9 @@ public:
             out += s * v.env * v.gainL * vol_mod;
         }
 
-        /* ── Filter compartido (con LFO->cutoff opcional) ── */
-        if(filterActive_) {
-            if(lfoDepth_ > 0.001f && lfoTarget_ == WT_LFO_CUTOFF) {
-                /* ±1 octava alrededor del cutoff base — recalcular coefs en
-                 * cada sample sería caro; usar suavizado por bloque vía
-                 * thinning (cada 32 samples ≈ 1.5 kHz update) */
-                if((++lfoCutoffTick_ & 31) == 0) {
-                    float fc = filterCutoff_ * powf(2.0f, lfoVal);
-                    fc = WTOSC_CLAMP(fc, 20.0f, sr_ * 0.45f);
-                    filter_.SetLPF(fc, filterQ_, sr_);
-                }
-            }
+        /* ── Filter compartido ── */
+        if(filterActive_)
             out = filter_.Process(out);
-        }
 
         return out;
     }
@@ -336,7 +321,6 @@ private:
     float    filterCutoff_  = 8000.0f;
     float    filterQ_       = 0.707f;
     bool     filterActive_  = false;
-    uint32_t lfoCutoffTick_ = 0;  /* throttling para LFO->cutoff (no recalc cada sample) */
     WtBiquad filter_;
 
     /* ── Voice allocation — robo de la más antigua ─────────────── */

@@ -490,8 +490,6 @@ struct Voice {
     /* ── Steal fade ── */
     float    stealFade;     /* 1.0 = normal, decaying → 0 when being stolen */
     bool     stealPending;  /* true = fading out for steal                  */
-    /* ── Loop wraparound crossfade (5 ms fade-in al saltar end→0) ── */
-    float    loopFade;      /* 0..1, ramp-up tras wraparound; 1.0 = sin fade */
 };
 static Voice   voices[MAX_VOICES];
 static uint32_t voiceAge = 0;
@@ -2247,29 +2245,6 @@ static float ApplyDist(float s, float drive, uint8_t mode){
     return s / d * (1.f + drive * 0.5f);
 }
 
-/* ApplyDistOS — versión con "poor man's 2x oversampling".
- * Para HARD y FUZZ (los que más aliasean a 48 kHz) procesa una muestra
- * intermedia interpolada linealmente desde la anterior y promedia el
- * resultado con la actual ya distorsionada (la media actúa como un LP
- * básico de decimación). Reduce ≈6–9 dB de aliasing perceptible sin
- * filtros polifásicos. Para SOFT/TUBE delega al path normal porque sus
- * curvas suaves ya banda-limitan razonablemente.
- * Coste: ≈1 mul + 1 llamada extra a ApplyDist por sample (solo cuando
- *        drive > 0.01 y mode ∈ {HARD, FUZZ}).
- * `prev` debe ser un float persistente por canal (uno para L, otro para R). */
-static inline float ApplyDistOS(float s, float drive, uint8_t mode, float& prev){
-    if(drive < 0.01f){ prev = s; return s; }
-    if(mode != DMODE_HARD && mode != DMODE_FUZZ){
-        prev = s;
-        return ApplyDist(s, drive, mode);
-    }
-    float mid = (prev + s) * 0.5f;
-    prev = s;
-    float a = ApplyDist(mid, drive, mode);
-    float b = ApplyDist(s,   drive, mode);
-    return (a + b) * 0.5f;
-}
-
 static float BitCrush(float s, uint8_t bits){
     if(bits >= 16) return s;
     float levels = (float)(1 << bits);
@@ -2947,10 +2922,7 @@ static void TriggerPad(uint8_t pad, uint8_t velocity,
             if(voices[i].stealPending){ slot = i; break; }
     }
 
-    /* 3. Priority-aware stealing: prefer same-pad, then voices already in decay,
-     *    then lowest priority + oldest. Voices in decay stage (envStage==1) son
-     *    candidatos preferentes porque su tail ya está bajando — robarlas no
-     *    crea un click audible. */
+    /* 3. Priority-aware stealing: prefer same-pad, then lowest priority + oldest */
     if(slot < 0){
         VoicePriority myPri = PadPriority(pad);
         int best = -1;
@@ -2962,11 +2934,6 @@ static void TriggerPad(uint8_t pad, uint8_t velocity,
             /* Never steal a higher-priority voice */
             if(vp > myPri) continue;
             int score = (2 - (int)vp) * 100000 + (int)(voiceAge - voices[i].age);
-            /* Boost: voices already in release/decay envelope se prefieren */
-            if(voices[i].envStage == 1) score += 50000;
-            /* Penalize: voices con envelope muy alto (full amplitude) — robar
-             * cortaría un transient activo, peor que un tail */
-            if(voices[i].env > 0.85f) score -= 30000;
             if(score > bestScore){ bestScore = score; best = i; }
         }
         if(best < 0) best = 0; /* absolute fallback */
@@ -3000,7 +2967,6 @@ static void TriggerPad(uint8_t pad, uint8_t velocity,
     voices[slot].gainR        = gR;
     voices[slot].stealFade    = 1.0f;
     voices[slot].stealPending = false;
-    voices[slot].loopFade     = 1.0f;  /* sin fade en el primer arranque */
     if(trkEnvAdActive[pad]){
         float atkMs = clampF(trkEnvAttackMs[pad], 0.0f, 2000.0f);
         voices[slot].env = (atkMs <= 0.01f) ? 1.0f : 0.0f;
@@ -3339,36 +3305,24 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
                              ? vx.maxLen : sampleLength[p];
             if(padReverse[p]){
                 if(vx.pos < 0.0f){
-                    if(padLoop[p]) { vx.pos = (float)(endLen - 1); vx.loopFade = 0.0f; }
+                    if(padLoop[p]) vx.pos = (float)(endLen - 1);
                     else { vx.active = false; continue; }
                 }
             } else {
                 if(idx >= endLen){
-                    if(padLoop[p]){ vx.pos = 0.0f; idx = 0; vx.loopFade = 0.0f; }
+                    if(padLoop[p]){ vx.pos = 0.0f; idx = 0; }
                     else { vx.active = false; continue; }
                 }
             }
             idx = (uint32_t)fabsf(vx.pos);
             if(idx >= sampleLength[p]){ vx.active = false; continue; }
 
-            /* Interpolation — Hermite/Catmull-Rom 4-point cubic.
-             * Mucho mejor que lineal para samples pitcheados (kicks/snares
-             * con pitch -5..-12 semitonos): elimina el shimmer de aliasing
-             * sin coste perceptible en CPU (4 multiplicaciones × 32 voces). */
+            /* Interpolation */
             float frac = fabsf(vx.pos) - idx;
-            const int16_t* sp = sampleStorage[p];
-            const uint32_t maxIdx = sampleLength[p];
-            const float kInv = 1.0f / 32768.0f;
-            float sm1 = (idx >= 1)         ? sp[idx - 1] * kInv : 0.0f;
-            float s0  =                       sp[idx]     * kInv;
-            float s1  = (idx + 1 < maxIdx) ? sp[idx + 1] * kInv : 0.0f;
-            float s2  = (idx + 2 < maxIdx) ? sp[idx + 2] * kInv : 0.0f;
-            /* Hermite (4-point, 3rd-order): suave y bandlimited en mid-range */
-            float c0 = s0;
-            float c1 = 0.5f * (s1 - sm1);
-            float c2 = sm1 - 2.5f * s0 + 2.0f * s1 - 0.5f * s2;
-            float c3 = 0.5f * (s2 - sm1) + 1.5f * (s0 - s1);
-            float s  = ((c3 * frac + c2) * frac + c1) * frac + c0;
+            float s0   = sampleStorage[p][idx] / 32768.0f;
+            float s1   = (idx + 1 < sampleLength[p])
+                         ? sampleStorage[p][idx + 1] / 32768.0f : 0.0f;
+            float s    = s0 + frac * (s1 - s0);
 
             /* ── Steal fade-out (5 ms exponential) ── */
             if(vx.stealPending){
@@ -3395,13 +3349,6 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
                 }
             }
             s *= vx.env * vx.stealFade;
-            /* Loop wraparound crossfade: rampa de 5 ms al volver al inicio para
-             * evitar click si sample[end] != sample[0] (loops mal alineados). */
-            if(vx.loopFade < 1.0f) {
-                s *= vx.loopFade;
-                vx.loopFade += (1.0f / (0.005f * (float)SAMPLE_RATE));
-                if(vx.loopFade > 1.0f) vx.loopFade = 1.0f;
-            }
 
             /* ── Stutter ── */
             if(padStutterOn[p]){
@@ -3478,20 +3425,9 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
                 if(trkLfoActive[p] && trkLfoTarget[p] == LFO_TGT_FILTER && !trkFilterLfoSet[p]){
                     float modCut = trkFilterCut[p] * (1.0f + 0.9f * lfoVal[p]);
                     modCut = clampF(modCut, 20.f, 20000.f);
-                    /* One-pole smoothing del cutoff entre bloques (≈4–6 ms tau)
-                     * para evitar zipper sutil en barridos LFO. Estado por pad. */
-                    static float trkFilterCutSmooth[MAX_PADS] = {0};
-                    static bool  trkFilterCutSmoothInit[MAX_PADS] = {false};
-                    if(!trkFilterCutSmoothInit[p]){
-                        trkFilterCutSmooth[p] = modCut;
-                        trkFilterCutSmoothInit[p] = true;
-                    } else {
-                        trkFilterCutSmooth[p] += (modCut - trkFilterCutSmooth[p]) * 0.35f;
-                    }
-                    float cutoffEff = trkFilterCutSmooth[p];
-                    trkFilter[p].SetType(trkFilterType[p], cutoffEff, trkFilterQ[p], (float)SAMPLE_RATE);
+                    trkFilter[p].SetType(trkFilterType[p], modCut, trkFilterQ[p], (float)SAMPLE_RATE);
                     if(trkFilterType[p] == FTYPE_RESONANT)
-                        trkFilter2[p].SetType(FTYPE_RESONANT, cutoffEff, trkFilterQ[p], (float)SAMPLE_RATE);
+                        trkFilter2[p].SetType(FTYPE_RESONANT, modCut, trkFilterQ[p], (float)SAMPLE_RATE);
                     trkFilterLfoSet[p] = 1;
                 }
                 s = sanitizeF(trkFilter[p].Process(s));
@@ -3588,14 +3524,12 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
             float outL = s * vx.gainL * lfoGain;
             float outR = s * vx.gainR * lfoGain;
 
-            /* ── Pan (equal-power: cos/sin con sqrtf, mantiene RMS constante) ── */
+            /* ── Pan ── */
             float panTrack = trackPanF[p];
             if(trkLfoActive[p] && trkLfoTarget[p] == LFO_TGT_PAN)
                 panTrack = clampF(panTrack + 0.9f * lfoVal[p], -1.0f, 1.0f);
-            /* panTrack ∈ [-1,+1] → mapea a [0,1] y aplica raiz cuadrada */
-            float panNorm = (panTrack + 1.0f) * 0.5f;
-            float panL = sqrtf(1.0f - panNorm);
-            float panR = sqrtf(panNorm);
+            float panL = (1.0f - panTrack) * 0.5f;
+            float panR = (1.0f + panTrack) * 0.5f;
             busL += outL * panL;
             busR += outR * panR;
 
@@ -3707,11 +3641,10 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
             float panTrk = trackPanF[t];
             if(trkLfoActive[t] && trkLfoTarget[t] == LFO_TGT_PAN)
                 panTrk = clampF(panTrk + 0.9f * lfoVal[t], -1.0f, 1.0f);
-            /* vol + pan -> bus  (equal-power: sqrtf, mantiene RMS al panear) */
+            /* vol + pan -> bus */
             float outS = s * trackGain[t] * lfoGain;
-            float panNormSyn = (panTrk + 1.f) * 0.5f;
-            float pL = sqrtf(1.f - panNormSyn);
-            float pR = sqrtf(panNormSyn);
+            float pL = (1.f - panTrk) * 0.5f;
+            float pR = (1.f + panTrk) * 0.5f;
             busL += outS * pL;
             busR += outS * pR;
             /* sends (stereo) — only if master FX engaged */
@@ -3834,14 +3767,12 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
             }
         }
 
-        /* ── Global bitcrush + distortion (master) ──
-         * Master path → oversample 2x para HARD/FUZZ (modes que más aliasean). */
+        /* ── Global bitcrush + distortion ── */
         if(IsGlobalFilterEngaged()){
             L = BitCrush(L, gFilterBitDepth);
             R = BitCrush(R, gFilterBitDepth);
-            static float gDistPrevL = 0.0f, gDistPrevR = 0.0f;
-            L = ApplyDistOS(L, gFilterDist, gFilterDistMode, gDistPrevL);
-            R = ApplyDistOS(R, gFilterDist, gFilterDistMode, gDistPrevR);
+            L = ApplyDist(L, gFilterDist, gFilterDistMode);
+            R = ApplyDist(R, gFilterDist, gFilterDistMode);
         }
 
         /* ── Global SAMPLE_RATE reduce ── */
@@ -3882,26 +3813,10 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
             }
         }
 
-        /* ── Compressor (con look-ahead de 64 muestras = 1.33 ms) ──
-         * Estrategia: el detector recibe la muestra ACTUAL (futura relativa
-         * al audio que sale), pero el sample que se comprime es uno antiguo
-         * del ring buffer. Así los picos transientes ya tienen el envelope
-         * apropiado bajado antes de pasar por el VCA. */
+        /* ── Compressor ── */
         if(IsCompEngaged()){
-            constexpr int LA_SIZE = 64;
-            static float laBufL[LA_SIZE] = {0};
-            static float laBufR[LA_SIZE] = {0};
-            static int   laWp = 0;
-            float Ldelayed = laBufL[laWp];
-            float Rdelayed = laBufR[laWp];
-            laBufL[laWp] = L;
-            laBufR[laWp] = R;
-            laWp = (laWp + 1) % LA_SIZE;
-            /* Process(in, key) usa max(|L|,|R|) como detector → estereo linkado */
-            float key = fmaxf(fabsf(L), fabsf(R));
-            (void)masterComp.Process(L, key);  /* actualiza gain_ con la muestra futura */
-            L = sanitizeF(masterComp.Apply(Ldelayed));
-            R = sanitizeF(masterComp.Apply(Rdelayed));
+            L = sanitizeF(masterComp.Process(L));
+            R = sanitizeF(masterComp.Apply(R));
         }
 
         /* ── Wavefolder ── */
@@ -4038,16 +3953,7 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
         float pk = fmaxf(fabsf(L), fabsf(R));
         if(pk > mixPeak) mixPeak = pk;
     }
-    /* Peak hold + slow decay (~250 ms half-life) so UI meter actualiza,
-     * pero un transient nunca se pierde porque siempre se compara con max */
-    {
-        float prev = masterPeak;
-        /* decay coef per block of size << SAMPLES (block-rate decay) */
-        const float kBlockDecay = 0.985f; /* ~ -0.13 dB/block @ 128/48k → ~250 ms hold */
-        float held = (mixPeak > prev) ? mixPeak : prev * kBlockDecay;
-        if(held < 1e-5f) held = 0.0f; /* floor (FTZ) */
-        masterPeak = held;
-    }
+    masterPeak = mixPeak;
     audioLoadMeter.OnBlockEnd();
 }
 
@@ -5585,10 +5491,7 @@ static void ProcessCommand()
         break;
 
     case CMD_SYNTH_NOTE_OFF:
-        if(len >= 2)
-            ReleaseTrackEngine(p[1], (int8_t)p[0]);
-        else
-            acid303.NoteOff();
+        acid303.NoteOff();
         break;
 
     case CMD_SYNTH_303_PARAM:

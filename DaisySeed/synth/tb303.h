@@ -135,13 +135,6 @@ struct Params {
     float    accentAmt  = 0.5f;     /* [0.0 – 1.0]                       */
     float    slideTime  = 0.06f;    /* [0.01 – 0.5]  s  portamento       */
 
-    /* ── Keyboard tracking del cutoff (302 hardware tiene tracking nativo) ──
-     * 0.0 = sin tracking (cutoff fijo absoluto)
-     * 1.0 = full tracking (cutoff sigue 1 oct/oct con la nota)
-     * Valor típico para acid: 0.3–0.5 — da "presencia coherente" sin
-     * sobre-brillar las notas altas. */
-    float    keyTrack   = 0.0f;     /* [0.0 – 1.0]  amount of cutoff key-follow */
-
     /* ── Salida ── */
     float    volume     = 0.7f;     /* [0.0 – 1.0]                       */
 };
@@ -522,15 +515,7 @@ public:
         /* ── 6. FILTRO LADDER ── */
         if (accent_) accentChirpEnv_ *= expf(-dt_ / 0.025f);  /* 25ms decay chirp */
         float envAmount = params.envMod * 12000.0f * fEnv;
-        /* Keyboard tracking: log2(f/220) octavas desde A3 — multiplicado por
-         * keyTrack convierte a Hz adicionales en el cutoff (1 oct → 6 kHz). */
-        float kbTrack = 0.0f;
-        if (params.keyTrack > 0.001f) {
-            float octFromA3 = log2f(currentFreq_ * (1.0f / 220.0f));
-            kbTrack = octFromA3 * params.keyTrack * 6000.0f;
-        }
-        float fc = Clamp(params.cutoff + envAmount + accentChirpEnv_ + kbTrack,
-                         20.0f, sr_ * 0.48f);
+        float fc = Clamp(params.cutoff + envAmount + accentChirpEnv_, 20.0f, sr_ * 0.48f);
 
         float res = params.resonance;
         if (accent_) res = Clamp(res + params.accentAmt * 0.25f, 0.0f, 0.97f);
@@ -570,7 +555,6 @@ public:
     void SetOverdrive (float v) { params.overdrive  = Clamp(v, 0.0f,    1.0f);     }
     void SetSubLevel  (float v) { params.subLevel   = Clamp(v, 0.0f,    1.0f);     }
     void SetDrift     (float v) { params.drift      = Clamp(v, 0.0f,    1.0f);     }
-    void SetKeyTrack  (float v) { params.keyTrack   = Clamp(v, 0.0f,    1.0f);     }
     void SetWaveform  (Waveform w) { params.waveform = w; }
     void SetVolume    (float v) { params.volume     = Clamp(v, 0.0f,    1.0f);     }
 

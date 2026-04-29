@@ -403,12 +403,6 @@ public:
         tailF_.SetCoefs(sr_, fc * 0.6f, 1.2f);
         burstF_.Reset();
         tailF_.Reset();
-        /* Sortea jitter pequeño por burst para dispersión humana */
-        burstJitter_[0] = 0.0f;  /* primer burst siempre on-time */
-        for (int i = 1; i < 4; i++) {
-            float r = (rng_.White() * 0.5f + 0.5f); /* [0..1] */
-            burstJitter_[i] = (r - 0.5f) * 0.0008f;  /* ±0.4 ms */
-        }
     }
 
     float Process() {
@@ -419,13 +413,9 @@ public:
         const float kDt  = 0.0065f;
         const float kLen = 0.0025f;
 
-        /* Phase-jitter: ±0.4 ms por burst — emula la dispersión natural
-         * de aplausos múltiples, evita el sonido "plano" del clap. Los
-         * offsets se sortean en Trigger() y se mantienen estables durante
-         * todo el evento para no introducir aliasing. */
         float burstEnv = 0.0f;
         for (int i = 0; i < 4; i++) {
-            float t = time_ - (i * kDt + burstJitter_[i]);
+            float t = time_ - i * kDt;
             if (t >= 0.0f && t < kLen)
                 burstEnv += expf(-t / 0.0015f);
         }
@@ -456,7 +446,6 @@ private:
     float time_ = 0.0f, vel_ = 1.0f;
     SVF   burstF_, tailF_;
     Rng   rng_;
-    float burstJitter_[4] = {0.0f, 0.0f, 0.0f, 0.0f};
 };
 
 /* =====================================================================
