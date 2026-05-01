@@ -5,7 +5,7 @@
 
 TARGET = DrumMachine
 
-CPP_SOURCES = main.cpp
+CPP_SOURCES = main.cpp syscalls.cpp
 
 # Include path for synth headers + DaisySP-LGPL
 C_INCLUDES += -I.

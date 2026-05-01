@@ -7035,7 +7035,7 @@ int main()
     }
     else
     {
-        Log("UART1: DESHABILITADO (modo standalone demo)");
+        Log("UART1 legacy: DESHABILITADO (transporte SPI1 activo)");
     }
 
     /* ── Inicializar secuenciador Daisy ── */
@@ -7065,7 +7065,7 @@ int main()
         Log("Audio: DESHABILITADO (diagnostico StartAudio)");
     }
 
-    /* LED apagado por defecto; se enciende por pulso UART */
+    /* LED apagado por defecto; se enciende por actividad de transporte */
     hw.SetLed(false);
     Log(">>> RED808 DRUM MACHINE READY <<<");
 
