@@ -331,6 +331,9 @@ public:
     }
 
     float Process() {
+        if (!active_)
+            return 0.0f;
+
         /* ── Portamento ── */
         if (params.portamento > 0.01f) {
             float portaTime = powf(params.portamento, 2.0f) * 2.0f + 0.001f;

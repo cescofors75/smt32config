@@ -998,21 +998,21 @@ public:
     float Process() {
         float mix = 0.0f;
 
-        auto add = [&](uint8_t id, float s) {
-            if (!chanMute_[id]) mix += s * chanVol_[id];
+        auto add = [&](uint8_t id, auto& inst) {
+            if (!chanMute_[id] && inst.IsActive()) mix += inst.Process() * chanVol_[id];
         };
 
-        add(INST_KICK,    kick.Process());
-        add(INST_SNARE,   snare.Process());
-        add(INST_CLAP,    clap.Process());
-        add(INST_HIHAT_C, hihatC.Process());
-        add(INST_HIHAT_O, hihatO.Process());
-        add(INST_LOW_TOM, lowTom.Process());
-        add(INST_MID_TOM, midTom.Process());
-        add(INST_HI_TOM,  hiTom.Process());
-        add(INST_COWBELL, cowbell.Process());
-        add(INST_CYMBAL,  cymbal.Process());
-        add(INST_RIMSHOT, rimshot.Process());
+        add(INST_KICK,    kick);
+        add(INST_SNARE,   snare);
+        add(INST_CLAP,    clap);
+        add(INST_HIHAT_C, hihatC);
+        add(INST_HIHAT_O, hihatO);
+        add(INST_LOW_TOM, lowTom);
+        add(INST_MID_TOM, midTom);
+        add(INST_HI_TOM,  hiTom);
+        add(INST_COWBELL, cowbell);
+        add(INST_CYMBAL,  cymbal);
+        add(INST_RIMSHOT, rimshot);
 
         /* Soft limiter */
         mix *= masterVol_;

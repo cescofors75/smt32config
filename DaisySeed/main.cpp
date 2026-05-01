@@ -8,7 +8,7 @@
  *  Per-track: Filter, Echo, Flanger, Comp, EQ 3-band, Sends,
  *             Pan, Mute/Solo
  *  Per-pad:   Filter, Distortion, Bitcrush, Loop, Reverse, Pitch,
- *             Stutter, Scratch, Turntablism
+ *             Stutter
  *  SD Card:   Carga de kits WAV vía SPI3 master (módulo 6-pin)
  *
  *  Verificado contra: DAISY_SLAVE_GUIDE.md (ESP32-S3 v1.0)
@@ -95,7 +95,6 @@ static CpuLoadMeter audioLoadMeter;
 #define MAX_SAMPLE_BYTES   (96000 * 2)   /* ~2.0 s per pad @ 48000  */
 #define MAX_DELAY_SAMPLES  96000         /* 2 s @ 48000             */
 #define TRACK_ECHO_SIZE    9600          /* 200 ms per track        */
-#define TRACK_FLANGER_SIZE 2048
 
 /* ═══════════════════════════════════════════════════════════════════
  *  3. PROTOCOLO RED808 — TODOS los command codes  (protocol.h)
@@ -229,6 +228,7 @@ static CpuLoadMeter audioLoadMeter;
 #define CMD_GET_CPU_LOAD      0xE2
 #define CMD_GET_VOICES        0xE3
 #define CMD_GET_EVENTS        0xE4
+#define CMD_DIAG_PERF_STRESS  0xE5  /* [mode(1): 0=off,1=on,2=reset metrics] */
 #define CMD_PING              0xEE
 #define CMD_RESET             0xEF
 
@@ -348,6 +348,13 @@ struct __attribute__((packed)) SPIPacketHeader {
 struct __attribute__((packed)) CpuLoadResponse {
     float    cpuLoad;
     uint32_t uptime;
+    float    cpuAvg;
+    float    cpuPeak;
+    uint8_t  activeVoices;
+    uint8_t  perfStressMode;
+    uint16_t spiErrCnt;
+    uint16_t spiRingDrops;
+    float    masterPeak;
 };
 
 #define RX_BUF_SIZE  536
@@ -730,6 +737,8 @@ static Tremolo    masterTremolo;
 static Compressor masterComp;
 static Fold       masterFold;
 DSY_SDRAM_BSS static Phaser     masterPhaser;
+DSY_SDRAM_BSS static Flanger    masterFlangerL;
+DSY_SDRAM_BSS static Flanger    masterFlangerR;
 
 /* Delay */
 static bool  delayActive   = false;
@@ -762,16 +771,13 @@ static bool  compRouted = true;
 static bool  phaserActive   = false;
 static bool  phaserRouted   = true;
 
-/* Flanger (manual: delay buf + LFO) */
+/* Flanger (DaisySP) */
 static bool  flangerActive  = false;
 static bool  flangerRouted  = true;
 static float flangerRate    = 0.5f;
 static float flangerDepth   = 0.5f;
 static float flangerFb      = 0.3f;
 static float flangerMix     = 0.3f;
-static float flangerPhase   = 0.0f;
-DSY_SDRAM_BSS static float flangerBuf[4096];
-static uint32_t flangerWp   = 0;
 
 /* Wavefolder + Limiter */
 static float waveFolderGain = 1.0f;
@@ -935,26 +941,6 @@ static bool     padStutterOn[MAX_PADS];
 static uint16_t padStutterIval[MAX_PADS];
 static uint16_t padStutterCnt[MAX_PADS];
 
-/* Scratch */
-static bool  padScratchOn[MAX_PADS];
-static float padScratchRate[MAX_PADS];
-static float padScratchDepth[MAX_PADS];
-static float padScratchCut[MAX_PADS];
-static float padScratchCrackle[MAX_PADS];
-static float padScratchPhase[MAX_PADS];
-static BiquadEQ padScratchFilter[MAX_PADS];
-
-/* Turntablism */
-static bool     padTurnOn[MAX_PADS];
-static bool     padTurnAuto[MAX_PADS];
-static int8_t   padTurnMode[MAX_PADS];
-static uint16_t padTurnBrakeMs[MAX_PADS];
-static uint16_t padTurnBackMs[MAX_PADS];
-static float    padTurnRate[MAX_PADS];
-static float    padTurnNoise[MAX_PADS];
-static float    padTurnPhase[MAX_PADS];
-static uint32_t padTurnCounter[MAX_PADS];
-
 /* ═══════════════════════════════════════════════════════════════════
  *  14. PER-TRACK MIXER + FX
  * ═══════════════════════════════════════════════════════════════════ */
@@ -989,15 +975,13 @@ static float    trkEchoFb[MAX_PADS];
 static float    trkEchoMix[MAX_PADS];
 static uint32_t trkEchoWp[MAX_PADS];
 
-/* Per-track flanger */
-DSY_SDRAM_BSS static float trkFlgBuf[MAX_PADS][TRACK_FLANGER_SIZE];
+/* Per-track flanger (DaisySP) */
+DSY_SDRAM_BSS static Flanger trkFlanger[MAX_PADS];
 static bool     trkFlgActive[MAX_PADS];
 static float    trkFlgDepth[MAX_PADS];
 static float    trkFlgRate[MAX_PADS];
 static float    trkFlgFb[MAX_PADS];
 static float    trkFlgMix[MAX_PADS];
-static float    trkFlgPhase[MAX_PADS];
-static uint32_t trkFlgWp[MAX_PADS];
 
 /* Per-track compressor */
 static bool  trkCompActive[MAX_PADS];
@@ -1419,6 +1403,25 @@ static inline uint8_t AudioCpuPercent()
     return (uint8_t)(load * 100.0f + 0.5f);
 }
 
+static inline float AudioCpuPercentFromLoad(float load)
+{
+    if(!isfinite(load) || load < 0.0f)
+        load = 0.0f;
+    if(load > 1.0f)
+        load = 1.0f;
+    return load * 100.0f;
+}
+
+static inline float AudioCpuAvgPercent()
+{
+    return AudioCpuPercentFromLoad(audioLoadMeter.GetAvgCpuLoad());
+}
+
+static inline float AudioCpuPeakPercent()
+{
+    return AudioCpuPercentFromLoad(audioLoadMeter.GetMaxCpuLoad());
+}
+
 /* ═══════════════════════════════════════════════════════════════════
  *  Tabla de remap: padIndex del ESP32 → TR808::InstrumentId
  *  ESP32 envía: 0=BD 1=SD 2=CH 3=OH 4=CY 5=CP 6=RS 7=CB
@@ -1531,14 +1534,33 @@ static constexpr bool kEnableInitFx = (RED808_ENABLE_INIT_FX != 0);    /* diagn�
 #ifndef RED808_STARTUP_TONE_SECONDS
 #define RED808_STARTUP_TONE_SECONDS 3
 #endif
+#ifndef RED808_STARTUP_STRESS_REPORT
+#define RED808_STARTUP_STRESS_REPORT 0
+#endif
+#ifndef RED808_STARTUP_STRESS_SECONDS
+#define RED808_STARTUP_STRESS_SECONDS 18
+#endif
 static constexpr bool kStartupToneTest = (RED808_STARTUP_TONE_TEST != 0); /* diagnóstico: tono directo 1kHz */
 static constexpr bool kStartup808SelfTest = (RED808_STARTUP_808_SELF_TEST != 0); /* diagnóstico: prueba sampler/synth */
+static constexpr bool kStartupStressReport = (RED808_STARTUP_STRESS_REPORT != 0);
+static constexpr uint32_t kStartupStressSeconds = RED808_STARTUP_STRESS_SECONDS;
 static constexpr bool kBypassIncomingCrc = false; /* producción: validar CRC de comandos entrantes */
 static constexpr bool kAcceptOneBasedPadIndex = false; /* ESP32 envía 0-based (pad 0=BD, 1=SD, etc.) */
 static constexpr bool kTriggerSynthOnLiveCmd = false; /* producción: no superponer synth al disparo de sampler */
 static constexpr bool kForceMasterGainDebug = false; /* producción: respetar master volume del host */
 static constexpr bool kSpiSingleFrame10 = true; /* compat: master envía trigger en 1 frame de 10 bytes */
 static bool demoModeActive = false; /* demo desactivada — audio codec y jack ya verificados */
+static bool perfStressMode = false;
+static uint8_t perfStressProfile = 0;
+static uint32_t perfStressNextMs = 0;
+static uint8_t perfStressStep = 0;
+static bool audioFxShed = false;
+static bool startupStressReportActive = false;
+static bool startupStressReportDone = false;
+static uint32_t startupStressStartMs = 0;
+static uint32_t startupStressLastReportMs = 0;
+static uint8_t startupStressPhase = 255;
+static constexpr uint32_t kStartupStressArmDelayMs = 8000u;
 
 /* PRNG for crackle/noise FX */
 static uint32_t noiseState = 0x12345678;
@@ -1619,6 +1641,26 @@ static uint16_t crc16(const uint8_t* d, uint16_t len){
  * ═══════════════════════════════════════════════════════════════════ */
 static inline float clampF(float v, float lo, float hi){
     return v < lo ? lo : (v > hi ? hi : v);
+}
+
+static inline void ConfigureFlanger(Flanger& flanger, float rateHz, float depth, float feedback)
+{
+    flanger.SetLfoFreq(clampF(rateHz, 0.1f, 20.0f));
+    flanger.SetLfoDepth(clampF(depth, 0.0f, 1.0f));
+    flanger.SetFeedback(clampF(feedback, 0.0f, 0.95f));
+    flanger.SetDelay(clampF(depth, 0.0f, 1.0f));
+}
+
+static inline void ConfigureMasterFlanger()
+{
+    ConfigureFlanger(masterFlangerL, flangerRate, flangerDepth, flangerFb);
+    ConfigureFlanger(masterFlangerR, flangerRate * 1.013f, flangerDepth, flangerFb);
+}
+
+static inline void ConfigureTrackFlanger(uint8_t track)
+{
+    if(track >= MAX_PADS) return;
+    ConfigureFlanger(trkFlanger[track], trkFlgRate[track], trkFlgDepth[track], trkFlgFb[track]);
 }
 
 /* Kill NaN — with FTZ+DN enabled, denormals are flushed by hardware */
@@ -2990,6 +3032,198 @@ static uint8_t ActiveVoices(){
     return c;
 }
 
+static uint8_t CountLoadedPads()
+{
+    uint8_t count = 0;
+    for(uint8_t i = 0; i < MAX_PADS; i++)
+        if(sampleLoaded[i]) count++;
+    return count;
+}
+
+static void SetPerformanceStressProfile(uint8_t profile);
+
+static void SetPerformanceStressMode(bool enabled)
+{
+    SetPerformanceStressProfile(enabled ? 2 : 0);
+}
+
+static void SetPerformanceStressProfile(uint8_t profile)
+{
+    perfStressProfile = profile;
+    perfStressMode = (profile != 0);
+    perfStressNextMs = hw.system.GetNow();
+    perfStressStep = 0;
+    if(perfStressMode){
+        delayActive = true;
+        delayTime = 280.0f;
+        delayFeedback = 0.42f;
+        delayMix = 0.18f;
+        masterDelay.SetDelay(delayTime / 1000.0f * (float)SAMPLE_RATE);
+        reverbActive = true;
+        reverbMix = 0.22f;
+        chorusActive = true;
+        chorusMix = 0.16f;
+        flangerActive = true;
+        flangerRate = 0.35f;
+        flangerDepth = 0.72f;
+        flangerFb = 0.34f;
+        flangerMix = 0.20f;
+        ConfigureMasterFlanger();
+        compActive = true;
+        limiterActive = true;
+    }
+}
+
+static void RunPerformanceStressMode(uint32_t nowMs)
+{
+    if(!perfStressMode || nowMs < perfStressNextMs)
+        return;
+
+    perfStressNextMs = nowMs + (kStartupStressReport ? 500u : 70u);
+    uint8_t step = perfStressStep++;
+
+    if(perfStressProfile >= 2){
+        for(uint8_t i = 0; i < 4; i++){
+            uint8_t pad = (uint8_t)((step + i * 5u) % MAX_PADS);
+            if(sampleLoaded[pad] && !padLoading[pad])
+                TriggerPad(pad, (uint8_t)(96 + (i * 7)), 100, 0, 0, 0.72f);
+        }
+    }
+
+    synth808.Trigger(padTo808[step & 15u], 0.75f);
+    synth909.Trigger(padTo909[(step + 3u) & 15u], 0.68f);
+    synth505.Trigger(padTo505[(step + 7u) & 15u], 0.60f);
+
+    if(!kStartupStressReport){
+        acid303.NoteOn((uint8_t)(36 + (step % 24u)), (step & 3u) == 0, (step & 7u) == 0);
+        wtOsc.NoteOn((uint8_t)(48 + (step % 12u)), 0.45f);
+    }
+
+    if(!kStartupStressReport && perfStressProfile >= 2){
+        synthSH101.NoteOn((uint8_t)(52 + (step % 12u)), 0.42f);
+        synthFM2Op.NoteOn((uint8_t)(60 + (step % 12u)), 0.35f);
+    }
+}
+
+static const char* StartupStressPhaseName(uint8_t phase)
+{
+    switch(phase){
+        case 0: return "baseline";
+        case 1: return "synth";
+        case 2: return "full";
+        case 3: return "cooldown";
+        default: return "done";
+    }
+}
+
+static void PrintStartupStressReport(uint32_t elapsedMs, const char* phase)
+{
+    if(!kEnableStartLog)
+        return;
+
+    uint16_t cpuAvg10 = (uint16_t)(AudioCpuAvgPercent() * 10.0f + 0.5f);
+    uint16_t cpuPeak10 = (uint16_t)(AudioCpuPeakPercent() * 10.0f + 0.5f);
+    uint16_t masterPeak1000 = (uint16_t)(clampF(masterPeak, 0.0f, 4.0f) * 1000.0f + 0.5f);
+    hw.PrintLine("STRESS_REPORT ms=%lu phase=%s cpu_avg=%u.%u cpu_peak=%u.%u voices=%u master_peak=%u.%03u clip=%u spi_err=%u spi_drop=%u loaded=%u",
+                 (unsigned long)elapsedMs,
+                 phase,
+                 (unsigned)(cpuAvg10 / 10u),
+                 (unsigned)(cpuAvg10 % 10u),
+                 (unsigned)(cpuPeak10 / 10u),
+                 (unsigned)(cpuPeak10 % 10u),
+                 (unsigned)ActiveVoices(),
+                 (unsigned)(masterPeak1000 / 1000u),
+                 (unsigned)(masterPeak1000 % 1000u),
+                 (unsigned)(masterPeak >= 1.0f ? 1 : 0),
+                 (unsigned)spiErrCnt,
+                 (unsigned)spiRingDrops,
+                 (unsigned)CountLoadedPads());
+}
+
+static void BeginStartupStressReport(uint32_t nowMs)
+{
+    if(!kStartupStressReport || startupStressReportDone)
+        return;
+    audioLoadMeter.Reset();
+    masterPeak = 0.0f;
+    spiErrCnt = 0;
+    spiRingDrops = 0;
+    startupStressReportActive = true;
+    startupStressStartMs = nowMs + kStartupStressArmDelayMs;
+    startupStressLastReportMs = 0;
+    startupStressPhase = 255;
+    if(kEnableStartLog)
+        hw.PrintLine("STRESS_REPORT_BEGIN seconds=%lu profiles=baseline,synth,full,cooldown audio_out=not_required",
+                     (unsigned long)kStartupStressSeconds);
+}
+
+static void RunStartupStressReport(uint32_t nowMs)
+{
+    if(!startupStressReportActive)
+        return;
+
+    if((int32_t)(nowMs - startupStressStartMs) < 0)
+        return;
+
+    uint32_t elapsed = nowMs - startupStressStartMs;
+    uint32_t totalMs = kStartupStressSeconds * 1000u;
+    if(totalMs < 8000u)
+        totalMs = 8000u;
+
+    uint8_t phase = 0;
+    uint8_t profile = 0;
+    if(elapsed < 2000u){
+        phase = 0;
+        profile = 0;
+    } else if(elapsed < (totalMs / 2u)){
+        phase = 1;
+        profile = 1;
+    } else if(elapsed < (totalMs - 2000u)){
+        phase = 2;
+        profile = 2;
+    } else if(elapsed < totalMs){
+        phase = 3;
+        profile = 0;
+    } else {
+        SetPerformanceStressProfile(0);
+        PrintStartupStressReport(elapsed, "done");
+        if(kEnableStartLog)
+        {
+            uint16_t cpuAvg10 = (uint16_t)(AudioCpuAvgPercent() * 10.0f + 0.5f);
+            uint16_t cpuPeak10 = (uint16_t)(AudioCpuPeakPercent() * 10.0f + 0.5f);
+            uint16_t masterPeak1000 = (uint16_t)(clampF(masterPeak, 0.0f, 4.0f) * 1000.0f + 0.5f);
+            hw.PrintLine("STRESS_REPORT_END cpu_avg=%u.%u cpu_peak=%u.%u voices=%u master_peak=%u.%03u spi_err=%u spi_drop=%u",
+                         (unsigned)(cpuAvg10 / 10u),
+                         (unsigned)(cpuAvg10 % 10u),
+                         (unsigned)(cpuPeak10 / 10u),
+                         (unsigned)(cpuPeak10 % 10u),
+                         (unsigned)ActiveVoices(),
+                         (unsigned)(masterPeak1000 / 1000u),
+                         (unsigned)(masterPeak1000 % 1000u),
+                         (unsigned)spiErrCnt,
+                         (unsigned)spiRingDrops);
+        }
+        startupStressReportActive = false;
+        startupStressReportDone = true;
+        return;
+    }
+
+    if(phase != startupStressPhase){
+        startupStressPhase = phase;
+        SetPerformanceStressProfile(profile);
+        if(kEnableStartLog)
+            hw.PrintLine("STRESS_PHASE ms=%lu phase=%s profile=%u",
+                         (unsigned long)elapsed,
+                         StartupStressPhaseName(phase),
+                         (unsigned)profile);
+    }
+
+    if(startupStressLastReportMs == 0 || (nowMs - startupStressLastReportMs) >= 1000u){
+        startupStressLastReportMs = nowMs;
+        PrintStartupStressReport(elapsed, StartupStressPhaseName(phase));
+    }
+}
+
 static void SilenceVoicesInPadRange(uint8_t startPad, uint8_t endPad)
 {
     if(endPad > MAX_PADS)
@@ -3022,13 +3256,13 @@ static void ResetTrackRuntimeState(uint8_t track)
     trkEchoActive[track] = false;
     trkEchoWp[track]     = 0;
     trkFlgActive[track]  = false;
-    trkFlgWp[track]      = 0;
+    trkFlanger[track].Init((float)SAMPLE_RATE);
+    ConfigureTrackFlanger((uint8_t)track);
     trkCompActive[track] = false;
     trkCompEnv[track]    = 0.0f;
     trackPeak[track]     = 0.0f;
     trkFxRouted[track]   = false;
     memset(trkEchoBuf[track], 0, sizeof(trkEchoBuf[track]));
-    memset(trkFlgBuf[track],  0, sizeof(trkFlgBuf[track]));
 }
 
 static void PreparePadRangeForReload(uint8_t startPad, uint8_t endPad)
@@ -3209,6 +3443,13 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
 
     float mixPeak = 0.0f;
 
+    float blockCpuAvg = AudioCpuAvgPercent();
+    if(blockCpuAvg > 86.0f)
+        audioFxShed = true;
+    else if(blockCpuAvg < 68.0f)
+        audioFxShed = false;
+    const bool fxShed = audioFxShed;
+
     /* ═ Pre-calcular: primer track que usa cada motor de síntesis ═ */
     int8_t engTrk[SYNTH_ENGINE_COUNT];
     for(int _ei = 0; _ei < SYNTH_ENGINE_COUNT; _ei++) engTrk[_ei] = -1;
@@ -3217,6 +3458,19 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
         if(_e >= 0 && _e < SYNTH_ENGINE_COUNT && engTrk[_e] < 0)
             engTrk[_e] = (int8_t)_t;
     }
+
+    const bool revEng = IsReverbEngaged();
+    const bool delEng = IsDelayEngaged();
+    const bool choEng = !fxShed && IsChorusEngaged();
+    bool anyTrackLfo = false;
+    for(int _t = 0; _t < MAX_PADS; _t++){
+        if(trkLfoActive[_t] && trkLfoDepth[_t] > 0.0001f){
+            anyTrackLfo = true;
+            break;
+        }
+    }
+    float lfoVal[MAX_PADS];
+    uint8_t trkFilterLfoSet[MAX_PADS];
 
     for(size_t i = 0; i < size; i++){
         /* ── Drenar SPI FIFO cada 4 samples (~83µs) para evitar overflow
@@ -3260,34 +3514,29 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
         float chorusBusL = 0, chorusBusR = 0;
         float sideSrc = 0;
 
-        /* Pre-compute send bus gates — stable across entire buffer */
-        const bool revEng = IsReverbEngaged();
-        const bool delEng = IsDelayEngaged();
-        const bool choEng = IsChorusEngaged();
+        if(anyTrackLfo){
+            for(int t = 0; t < MAX_PADS; t++){
+                lfoVal[t] = 0.0f;
+                trkFilterLfoSet[t] = 0;
+                if(!trkLfoActive[t] || trkLfoDepth[t] <= 0.0001f) continue;
 
-        float lfoVal[MAX_PADS];
-        uint8_t trkFilterLfoSet[MAX_PADS];
-        for(int t = 0; t < MAX_PADS; t++){
-            lfoVal[t] = 0.0f;
-            trkFilterLfoSet[t] = 0;
-            if(!trkLfoActive[t] || trkLfoDepth[t] <= 0.0001f) continue;
+                trkLfoPhase[t] += trkLfoRate[t] / (float)SAMPLE_RATE;
+                if(trkLfoPhase[t] >= 1.0f){
+                    trkLfoPhase[t] -= 1.0f;
+                    if(trkLfoWave[t] == LFO_WAVE_SH)
+                        trkLfoSH[t] = RandFloat(); /* -1..1 */
+                }
 
-            trkLfoPhase[t] += trkLfoRate[t] / (float)SAMPLE_RATE;
-            if(trkLfoPhase[t] >= 1.0f){
-                trkLfoPhase[t] -= 1.0f;
-                if(trkLfoWave[t] == LFO_WAVE_SH)
-                    trkLfoSH[t] = RandFloat(); /* -1..1 */
+                float v = 0.0f;
+                if(trkLfoWave[t] == LFO_WAVE_TRI)
+                    v = TriFromPhase(trkLfoPhase[t]);
+                else if(trkLfoWave[t] == LFO_WAVE_SH)
+                    v = trkLfoSH[t];
+                else
+                    v = __fast_sinf(2.0f * (float)M_PI * trkLfoPhase[t]);
+
+                lfoVal[t] = v * trkLfoDepth[t];
             }
-
-            float v = 0.0f;
-            if(trkLfoWave[t] == LFO_WAVE_TRI)
-                v = TriFromPhase(trkLfoPhase[t]);
-            else if(trkLfoWave[t] == LFO_WAVE_SH)
-                v = trkLfoSH[t];
-            else
-                v = __fast_sinf(2.0f * (float)M_PI * trkLfoPhase[t]);
-
-            lfoVal[t] = v * trkLfoDepth[t];
         }
 
         /* ── Render voices ── */
@@ -3361,37 +3610,6 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
 
             /* ── Advance position ── */
             float adv = vx.speed;
-            if(padScratchOn[p]){
-                float tri = padScratchPhase[p] < 0.5f
-                    ? padScratchPhase[p]*2.f : 2.f - padScratchPhase[p]*2.f;
-                adv *= 1.f + (tri - 0.5f) * padScratchDepth[p];
-                if(adv < 0.25f) adv = 0.25f;
-                padScratchPhase[p] += padScratchRate[p] / (float)SAMPLE_RATE;
-                if(padScratchPhase[p] >= 1.f) padScratchPhase[p] -= 1.f;
-            }
-            if(padTurnOn[p]){
-                int8_t mode = padTurnMode[p];
-                if(padTurnAuto[p]){
-                    mode = (padTurnPhase[p] < 0.5f) ? 0 : 1;
-                    padTurnPhase[p] += padTurnRate[p] / (float)SAMPLE_RATE;
-                    if(padTurnPhase[p] >= 1.f) padTurnPhase[p] -= 1.f;
-                }
-                if(mode == 1){
-                    float bsmp = padTurnBrakeMs[p] * (float)SAMPLE_RATE / 1000.f;
-                    float envF = 1.f - clampF((float)padTurnCounter[p]/bsmp, 0.f, 1.f);
-                    adv *= envF;
-                    if(adv < 0.01f) adv = 0.01f;
-                    padTurnCounter[p]++;
-                } else if(mode == 2){
-                    float bsmp = padTurnBackMs[p] * (float)SAMPLE_RATE / 1000.f;
-                    if((padTurnCounter[p] % 3) == 0 && vx.pos > 0.f) vx.pos -= 1.f;
-                    adv *= 0.7f;
-                    padTurnCounter[p]++;
-                    if(padTurnCounter[p] > (uint32_t)bsmp) padTurnCounter[p] = 0;
-                } else {
-                    padTurnCounter[p] = 0;
-                }
-            }
             /* ── LFO → Pitch (modulate playback speed) ── */
             if(trkLfoActive[p] && trkLfoTarget[p] == LFO_TGT_PITCH)
                 adv *= clampF(1.0f + 0.5f * lfoVal[p], 0.25f, 4.0f);
@@ -3406,16 +3624,6 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
             /* ── Pad distortion + crush ── */
             s = ApplyDist(s, padDistDrive[p], padDistMode[p]);
             s = BitCrush(s, padBitDepth[p]);
-
-            /* ── Scratch FX ── */
-            if(padScratchOn[p]){
-                padScratchFilter[p].SetType(FTYPE_LOWPASS, padScratchCut[p], 0.707f, (float)SAMPLE_RATE);
-                s = sanitizeF(padScratchFilter[p].Process(s));
-                if(padScratchCrackle[p] > 0.01f && (FastRand() & 0xFF) < (uint32_t)(padScratchCrackle[p]*64.f))
-                    s += RandFloat() * 0.05f;
-            }
-            if(padTurnOn[p] && padTurnNoise[p] > 0.01f)
-                s += RandFloat() * padTurnNoise[p] * 0.1f;
 
             /* ── Per-track FX (only when routed in graph) ── */
             if(trkFxRouted[p]){
@@ -3456,7 +3664,7 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
             if(trkEqHighDb[p]) s = sanitizeF(trkEqHigh[p].Process(s));
 
             /* ── Per-track echo ── */
-            if(trkEchoActive[p]){
+            if(!fxShed && trkEchoActive[p]){
                 float rawDelay = trkEchoDelay[p];
                 if(trkLfoActive[p] && trkLfoTarget[p] == LFO_TGT_ECHO_TIME)
                     rawDelay = clampF(rawDelay * (1.0f + 0.4f * lfoVal[p]), 1.f, (float)(TRACK_ECHO_SIZE-1));
@@ -3473,22 +3681,13 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
             }
 
             /* ── Per-track flanger ── */
-            if(trkFlgActive[p]){
-                trkFlgBuf[p][trkFlgWp[p]] = s;
-                float tri = trkFlgPhase[p] < 0.5f ? trkFlgPhase[p]*2.f : 2.f - trkFlgPhase[p]*2.f;
-                uint32_t tap = 2 + (uint32_t)(tri * trkFlgDepth[p] * (float)TRACK_FLANGER_SIZE * 0.25f);
-                if(tap >= TRACK_FLANGER_SIZE) tap = TRACK_FLANGER_SIZE - 1;
-                uint32_t rp = (trkFlgWp[p] + TRACK_FLANGER_SIZE - tap) % TRACK_FLANGER_SIZE;
-                float del = trkFlgBuf[p][rp];
-                trkFlgBuf[p][trkFlgWp[p]] = clampF(s + del*trkFlgFb[p], -1.f, 1.f);
-                s = s*(1.f - trkFlgMix[p]) + del*trkFlgMix[p];
-                trkFlgWp[p] = (trkFlgWp[p] + 1) % TRACK_FLANGER_SIZE;
-                trkFlgPhase[p] += trkFlgRate[p] / (float)SAMPLE_RATE;
-                if(trkFlgPhase[p] >= 1.f) trkFlgPhase[p] -= 1.f;
+            if(!fxShed && trkFlgActive[p]){
+                float wet = sanitizeF(trkFlanger[p].Process(s));
+                s = s*(1.f - trkFlgMix[p]) + wet*trkFlgMix[p];
             }
 
             /* ── Per-track compressor ── */
-            if(trkCompActive[p]){
+            if(!fxShed && trkCompActive[p]){
                 float absS = fabsf(s);
                 if(absS > trkCompEnv[p]) trkCompEnv[p] += (absS - trkCompEnv[p]) * 0.25f;
                 else                     trkCompEnv[p] -= (trkCompEnv[p] - absS) * 0.03f;
@@ -3591,7 +3790,7 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
             if(trkEqMidDb[t])  s = sanitizeF(trkEqMid[t].Process(s));
             if(trkEqHighDb[t]) s = sanitizeF(trkEqHigh[t].Process(s));
             /* echo */
-            if(trkEchoActive[t]){
+            if(!fxShed && trkEchoActive[t]){
                 uint32_t d = (uint32_t)trkEchoDelay[t];
                 if(d == 0)
                     d = 1;
@@ -3604,21 +3803,12 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
                 trkEchoWp[t] = (trkEchoWp[t] + 1) % TRACK_ECHO_SIZE;
             }
             /* flanger */
-            if(trkFlgActive[t]){
-                trkFlgBuf[t][trkFlgWp[t]] = s;
-                float tri = trkFlgPhase[t] < 0.5f ? trkFlgPhase[t]*2.f : 2.f-trkFlgPhase[t]*2.f;
-                uint32_t tap = 2 + (uint32_t)(tri * trkFlgDepth[t] * (float)TRACK_FLANGER_SIZE * 0.25f);
-                if(tap >= TRACK_FLANGER_SIZE) tap = TRACK_FLANGER_SIZE-1;
-                uint32_t rpf = (trkFlgWp[t] + TRACK_FLANGER_SIZE - tap) % TRACK_FLANGER_SIZE;
-                float del = trkFlgBuf[t][rpf];
-                trkFlgBuf[t][trkFlgWp[t]] = clampF(s + del*trkFlgFb[t], -1.f, 1.f);
-                s = s*(1.f - trkFlgMix[t]) + del*trkFlgMix[t];
-                trkFlgWp[t] = (trkFlgWp[t] + 1) % TRACK_FLANGER_SIZE;
-                trkFlgPhase[t] += trkFlgRate[t] / (float)SAMPLE_RATE;
-                if(trkFlgPhase[t] >= 1.f) trkFlgPhase[t] -= 1.f;
+            if(!fxShed && trkFlgActive[t]){
+                float wet = sanitizeF(trkFlanger[t].Process(s));
+                s = s*(1.f - trkFlgMix[t]) + wet*trkFlgMix[t];
             }
             /* compressor */
-            if(trkCompActive[t]){
+            if(!fxShed && trkCompActive[t]){
                 float absS = fabsf(s);
                 if(absS > trkCompEnv[t]) trkCompEnv[t] += (absS - trkCompEnv[t]) * 0.25f;
                 else                     trkCompEnv[t] -= (trkCompEnv[t] - absS) * 0.03f;
@@ -3667,32 +3857,32 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
         };
 
         /* demoFadeGain ya calculado arriba por el bloque DEMO MODE */
-        if (synthActiveMask & (1 << SYNTH_ENGINE_808)){
+        if ((synthActiveMask & (1 << SYNTH_ENGINE_808)) && synth808.ActiveCount() > 0){
             float s = sanitizeF(synth808.Process()) * demoFadeGain;
             synthTobus(s, engTrk[SYNTH_ENGINE_808]);
         }
-        if (synthActiveMask & (1 << SYNTH_ENGINE_909)){
+        if ((synthActiveMask & (1 << SYNTH_ENGINE_909)) && synth909.ActiveCount() > 0){
             float s = sanitizeF(synth909.Process()) * demoFadeGain;
             synthTobus(s, engTrk[SYNTH_ENGINE_909]);
         }
-        if (kEnableSynth505 && (synthActiveMask & (1 << SYNTH_ENGINE_505))){
+        if (kEnableSynth505 && (synthActiveMask & (1 << SYNTH_ENGINE_505)) && synth505.ActiveCount() > 0){
             float s = sanitizeF(synth505.Process()) * demoFadeGain;
             synthTobus(s, engTrk[SYNTH_ENGINE_505]);
         }
-        if (synthActiveMask & (1 << SYNTH_ENGINE_303)){
+        if ((synthActiveMask & (1 << SYNTH_ENGINE_303)) && acid303.IsActive()){
             /* v2.5: −4dB headroom en synths melódicos para no saturar el bus */
             float s = sanitizeF(acid303.Process()) * demoFadeGain * 0.63f;
             synthTobus(s, engTrk[SYNTH_ENGINE_303]);
         }
-        if (synthActiveMask & (1 << SYNTH_ENGINE_WTOSC)){
+        if ((synthActiveMask & (1 << SYNTH_ENGINE_WTOSC)) && wtOsc.IsActive()){
             float s = sanitizeF(wtOsc.Process()) * demoFadeGain * 0.63f;
             synthTobus(s, engTrk[SYNTH_ENGINE_WTOSC]);
         }
-        if (synthActiveMask & (1 << SYNTH_ENGINE_SH101)){  /* I1 */
+        if ((synthActiveMask & (1 << SYNTH_ENGINE_SH101)) && synthSH101.IsActive()){  /* I1 */
             float s = sanitizeF(synthSH101.Process()) * demoFadeGain * 0.63f;
             synthTobus(s, engTrk[SYNTH_ENGINE_SH101]);
         }
-        if (synthActiveMask & (1 << SYNTH_ENGINE_FM2OP)){  /* I2 */
+        if ((synthActiveMask & (1 << SYNTH_ENGINE_FM2OP)) && synthFM2Op.IsActive()){  /* I2 */
             float s = sanitizeF(synthFM2Op.Process()) * demoFadeGain * 0.63f;
             synthTobus(s, engTrk[SYNTH_ENGINE_FM2OP]);
         }
@@ -3790,7 +3980,7 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
         }
 
         /* ── Autowah ── */
-        if(IsAutowahEngaged()){
+        if(!fxShed && IsAutowahEngaged()){
             float awL = sanitizeF(masterAutowah.Process(L));
             L = L * (1.0f - autowahMix) + awL * autowahMix;
             R = R * (1.0f - autowahMix) + awL * autowahMix;
@@ -3815,38 +4005,30 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
         }
 
         /* ── Compressor ── */
-        if(IsCompEngaged()){
+        if(!fxShed && IsCompEngaged()){
             L = sanitizeF(masterComp.Process(L));
             R = sanitizeF(masterComp.Apply(R));
         }
 
         /* ── Wavefolder ── */
-        if(IsWaveFolderEngaged()){
+        if(!fxShed && IsWaveFolderEngaged()){
             masterFold.SetIncrement(waveFolderGain);
             L = sanitizeF(masterFold.Process(L));
             R = sanitizeF(masterFold.Process(R));
         }
 
         /* ── Phaser ── */
-        if(IsPhaserEngaged()){
+        if(!fxShed && IsPhaserEngaged()){
             L = sanitizeF(masterPhaser.Process(L));
             R = R * 0.7f + L * 0.3f;
         }
 
-        /* ── Flanger (manual) ── */
-        if(IsFlangerEngaged()){
-            flangerBuf[flangerWp] = sanitizeF(L);
-            float tri = flangerPhase < 0.5f ? flangerPhase*2.f : 2.f - flangerPhase*2.f;
-            uint32_t tap = 4 + (uint32_t)(tri * flangerDepth * 200.f);
-            if(tap >= 4096) tap = 4095;
-            uint32_t rp = (flangerWp + 4096 - tap) % 4096;
-            float del = flangerBuf[rp];
-            flangerBuf[flangerWp] = clampF(L + del*flangerFb, -1.f, 1.f);
-            L = L*(1.f - flangerMix) + del*flangerMix;
-            R = R*(1.f - flangerMix) + del*flangerMix;
-            flangerWp = (flangerWp + 1) % 4096;
-            flangerPhase += flangerRate / (float)SAMPLE_RATE;
-            if(flangerPhase >= 1.f) flangerPhase -= 1.f;
+        /* ── Flanger (DaisySP) ── */
+        if(!fxShed && IsFlangerEngaged()){
+            float wetL = sanitizeF(masterFlangerL.Process(L));
+            float wetR = sanitizeF(masterFlangerR.Process(R));
+            L = L*(1.f - flangerMix) + wetL*flangerMix;
+            R = R*(1.f - flangerMix) + wetR*flangerMix;
         }
 
         /* ── Tremolo ── */
@@ -3856,7 +4038,7 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
         }
 
         /* ── Chorus (mono or stereo, with send bus input) ── */
-        if(IsChorusEngaged()){
+        if(!fxShed && IsChorusEngaged()){
             float chorusSendMono = (chorusBusL + chorusBusR) * 0.5f;
             if(chorusStereoMode){
                 float wetL = sanitizeF(masterChorus.Process(L + chorusSendMono));
@@ -3871,7 +4053,7 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
         }
 
         /* ── Early Reflections (before reverb) ── */
-        if(IsEarlyRefEngaged()){
+        if(!fxShed && IsEarlyRefEngaged()){
             float erL = 0, erR = 0;
             for(int t = 0; t < ER_TAPS; t++){
                 erL += erDelayL.Read(erTapTimesL[t] * 0.001f * (float)SAMPLE_RATE) * erTapGains[t];
@@ -4315,16 +4497,19 @@ static void ProcessCommand()
         if(len >= 1) flangerActive = (p[0] != 0);
         break;
     case CMD_FLANGER_RATE:
-        if(len >= 4){ float v; memcpy(&v, p, 4); flangerRate = clampF(v * 10.f, 0.1f, 10.f); }
+        if(len >= 4){ float v; memcpy(&v, p, 4); flangerRate = clampF(v * 10.f, 0.1f, 10.f); ConfigureMasterFlanger(); }
         else if(len >= 1) flangerRate = clampF(p[0] * 0.1f, 0.1f, 20.f);
+        ConfigureMasterFlanger();
         break;
     case CMD_FLANGER_DEPTH:
-        if(len >= 4){ float v; memcpy(&v, p, 4); flangerDepth = clampF(v, 0.f, 1.f); }
+        if(len >= 4){ float v; memcpy(&v, p, 4); flangerDepth = clampF(v, 0.f, 1.f); ConfigureMasterFlanger(); }
         else if(len >= 1) flangerDepth = p[0] / 100.0f;
+        ConfigureMasterFlanger();
         break;
     case CMD_FLANGER_FEEDBACK:
-        if(len >= 4){ float v; memcpy(&v, p, 4); flangerFb = clampF(v, -0.95f, 0.95f); }
+        if(len >= 4){ float v; memcpy(&v, p, 4); flangerFb = clampF(v, 0.f, 0.95f); ConfigureMasterFlanger(); }
         else if(len >= 1) flangerFb = p[0] / 100.0f;
+        ConfigureMasterFlanger();
         break;
     case CMD_FLANGER_MIX:
         if(len >= 4){ float v; memcpy(&v, p, 4); flangerMix = clampF(v, 0.f, 1.f); }
@@ -4518,6 +4703,7 @@ static void ProcessCommand()
             trkFlgRate[t]  = clampF(rate, 0.1f, 10.f);
             trkFlgFb[t]    = clampF(fb, 0.f, 0.95f);
             trkFlgMix[t]   = 0.5f;  /* fixed 50/50; payload has no mix field */
+            ConfigureTrackFlanger(t);
         }
         break;
     case CMD_TRACK_COMPRESSOR:
@@ -4541,8 +4727,9 @@ static void ProcessCommand()
             trkEchoActive[t] = false;
             trkFlgActive[t]  = false;
             trkCompActive[t] = false;
+            trkFlanger[t].Init((float)SAMPLE_RATE);
+            ConfigureTrackFlanger(t);
             memset(trkEchoBuf[t], 0, sizeof(trkEchoBuf[t]));
-            memset(trkFlgBuf[t],  0, sizeof(trkFlgBuf[t]));
         }
         break;
     case CMD_TRACK_CLEAR_FX:
@@ -4553,7 +4740,9 @@ static void ProcessCommand()
             trkDistDrive[t]  = 0;  trkDistMode[t] = 0;
             trkBitDepth[t]   = 16;
             trkEchoActive[t] = false; trkEchoWp[t] = 0;
-            trkFlgActive[t]  = false; trkFlgWp[t] = 0;
+            trkFlgActive[t]  = false;
+            trkFlanger[t].Init((float)SAMPLE_RATE);
+            ConfigureTrackFlanger(t);
             trkCompActive[t] = false; trkCompEnv[t] = 0;
             trackReverbSend[t] = 0; trackDelaySend[t] = 0;
             trackChorusSend[t] = 0;
@@ -4570,7 +4759,6 @@ static void ProcessCommand()
             trkEnvAttackMs[t] = 1.0f;
             trkEnvDecayMs[t]  = 250.0f;
             memset(trkEchoBuf[t], 0, sizeof(trkEchoBuf[t]));
-            memset(trkFlgBuf[t],  0, sizeof(trkFlgBuf[t]));
         }
         break;
 
@@ -4777,37 +4965,10 @@ static void ProcessCommand()
         }
         break;
     case CMD_PAD_SCRATCH:
-        if(len >= 20 && p[0] < MAX_PADS){
-            uint8_t pad = p[0];
-            padScratchOn[pad] = (p[1] != 0);
-            float rate, depth, cut, crackle;
-            memcpy(&rate,    p + 4,  4);
-            memcpy(&depth,   p + 8,  4);
-            memcpy(&cut,     p + 12, 4);
-            memcpy(&crackle, p + 16, 4);
-            padScratchRate[pad]    = clampF(rate, 0.5f, 20.f);
-            padScratchDepth[pad]   = clampF(depth, 0.f, 1.f);
-            padScratchCut[pad]     = clampF(cut, 200.f, 16000.f);
-            padScratchCrackle[pad] = clampF(crackle, 0.f, 1.f);
-        }
+        /* Removed from Daisy audio engine; command kept as protocol no-op. */
         break;
     case CMD_PAD_TURNTABLISM:
-        if(len >= 16 && p[0] < MAX_PADS){
-            uint8_t pad = p[0];
-            padTurnOn[pad]   = (p[1] != 0);
-            padTurnAuto[pad] = (p[2] != 0);
-            padTurnMode[pad] = (int8_t)p[3];
-            uint16_t brk, bck;
-            memcpy(&brk, p + 4, 2);
-            memcpy(&bck, p + 6, 2);
-            padTurnBrakeMs[pad] = (brk < 20) ? 20 : (brk > 2000 ? 2000 : brk);
-            padTurnBackMs[pad]  = (bck < 20) ? 20 : (bck > 2000 ? 2000 : bck);
-            float tRate, noise;
-            memcpy(&tRate, p + 8,  4);
-            memcpy(&noise, p + 12, 4);
-            padTurnRate[pad]  = clampF(tRate, 0.2f, 30.f);
-            padTurnNoise[pad] = clampF(noise, 0.f, 1.f);
-        }
+        /* Removed from Daisy audio engine; command kept as protocol no-op. */
         break;
     case CMD_PAD_CLEAR_FX:
         if(len >= 1 && p[0] < MAX_PADS){
@@ -4815,7 +4976,7 @@ static void ProcessCommand()
             padFilterType[pad] = 0; padFilter[pad].Reset();
             padDistDrive[pad] = 0; padDistMode[pad] = 0; padBitDepth[pad] = 16;
             padLoop[pad] = false; padReverse[pad] = false; padPitch[pad] = 1.0f; trkPitchCents[pad] = 0;
-            padStutterOn[pad] = false; padScratchOn[pad] = false; padTurnOn[pad] = false;
+            padStutterOn[pad] = false;
         }
         break;
 
@@ -5175,7 +5336,7 @@ static void ProcessCommand()
 
     case CMD_GET_STATUS: {
         /* Expanded: 20 bytes base + 1 byte eventCount + 32 bytes currentKit */
-        uint8_t resp[54]; memset(resp, 0, sizeof(resp));
+        uint8_t resp[64]; memset(resp, 0, sizeof(resp));
         resp[0] = ActiveVoices();
         resp[1] = AudioCpuPercent();
         /* resp[2-3]: loaded bitmask pads 0-15 */
@@ -5213,15 +5374,27 @@ static void ProcessCommand()
         memcpy(resp + 47, &totalBytes, 4);
         /* resp[51]: MAX_PADS */
         resp[51] = MAX_PADS;
-        /* resp[52-53]: reserved */
-        BuildResponse(CMD_GET_STATUS, hdr->sequence, resp, 54);
+        resp[52] = (uint8_t)(AudioCpuPeakPercent() + 0.5f);
+        resp[53] = perfStressMode ? 1 : 0;
+        resp[54] = (uint8_t)(AudioCpuAvgPercent() + 0.5f);
+        resp[55] = (uint8_t)(masterPeak >= 1.0f ? 1 : 0);
+        uint16_t ringDrops = spiRingDrops;
+        memcpy(resp + 56, &ringDrops, 2);
+        BuildResponse(CMD_GET_STATUS, hdr->sequence, resp, 58);
         return;
     }
 
     case CMD_GET_CPU_LOAD: {
         CpuLoadResponse resp;
-        resp.cpuLoad = (float)AudioCpuPercent();
+        resp.cpuLoad = AudioCpuAvgPercent();
         resp.uptime = hw.system.GetNow();
+        resp.cpuAvg = AudioCpuAvgPercent();
+        resp.cpuPeak = AudioCpuPeakPercent();
+        resp.activeVoices = ActiveVoices();
+        resp.perfStressMode = perfStressMode ? 1 : 0;
+        resp.spiErrCnt = spiErrCnt;
+        resp.spiRingDrops = spiRingDrops;
+        resp.masterPeak = masterPeak;
         BuildResponse(CMD_GET_CPU_LOAD, hdr->sequence, (const uint8_t*)&resp, sizeof(resp));
         return;
     }
@@ -5245,19 +5418,43 @@ static void ProcessCommand()
         return;
     }
 
+    case CMD_DIAG_PERF_STRESS: {
+        if(len >= 1){
+            if(p[0] == 2){
+                audioLoadMeter.Reset();
+                masterPeak = 0.0f;
+                spiErrCnt = 0;
+                spiRingDrops = 0;
+            } else {
+                SetPerformanceStressMode(p[0] != 0);
+            }
+        }
+        uint8_t resp[4] = {
+            (uint8_t)(perfStressMode ? 1 : 0),
+            (uint8_t)(AudioCpuAvgPercent() + 0.5f),
+            (uint8_t)(AudioCpuPeakPercent() + 0.5f),
+            ActiveVoices()
+        };
+        BuildResponse(CMD_DIAG_PERF_STRESS, hdr->sequence, resp, sizeof(resp));
+        return;
+    }
+
     /* ════════════════════════════════════════════
      *  RESET
      * ════════════════════════════════════════════ */
     case CMD_RESET:
+        SetPerformanceStressMode(false);
         for(int v = 0; v < MAX_VOICES; v++) voices[v].active = false;
         for(int i = 0; i < MAX_PADS; i++){
             sampleLoaded[i] = false; sampleLength[i] = 0;
             trackGain[i]    = 1.0f;  trackPeak[i] = 0;
             padLoop[i] = false; padReverse[i] = false; padPitch[i] = 1.0f; trkPitchCents[i] = 0;
             padFilterType[i] = 0; padDistDrive[i] = 0; padDistMode[i] = 0; padBitDepth[i] = 16;
-            padStutterOn[i] = false; padScratchOn[i] = false; padTurnOn[i] = false;
+            padStutterOn[i] = false;
             trkFilterType[i] = 0; trkDistDrive[i] = 0; trkBitDepth[i] = 16;
             trkEchoActive[i] = false; trkFlgActive[i] = false; trkCompActive[i] = false;
+            trkFlanger[i].Init((float)SAMPLE_RATE);
+            ConfigureTrackFlanger((uint8_t)i);
             trackReverbSend[i] = 0; trackDelaySend[i] = 0; trackChorusSend[i] = 0;
             trackPanF[i] = 0; trackMute[i] = false; trackSolo[i] = false;
             trkEqLowDb[i] = 0; trkEqMidDb[i] = 0; trkEqHighDb[i] = 0;
@@ -6616,8 +6813,6 @@ static void InitArrays()
         padDistMode[i]   = 0;
         padBitDepth[i]   = 16;
         padStutterOn[i]  = false;
-        padScratchOn[i]  = false;
-        padTurnOn[i]     = false;
         trackReverbSend[i] = 0;
         trackDelaySend[i]  = 0;
         trackChorusSend[i] = 0;
@@ -6633,7 +6828,8 @@ static void InitArrays()
         trkEchoActive[i] = false;
         trkEchoWp[i] = 0;
         trkFlgActive[i]  = false;
-        trkFlgWp[i] = 0;
+        trkFlanger[i].Init((float)SAMPLE_RATE);
+        ConfigureTrackFlanger((uint8_t)i);
         trkCompActive[i] = false;
         trkCompThresh[i] = 0.6f;
         trkCompRatio[i]  = 4.0f;
@@ -6700,10 +6896,14 @@ static void InitFX()
     masterPhaser.SetLfoDepth(0.4f);
     masterPhaser.SetFeedback(0.5f);
 
-    memset(flangerBuf, 0, sizeof(flangerBuf));
+    masterFlangerL.Init(sr);
+    masterFlangerR.Init(sr);
+    ConfigureMasterFlanger();
+
     for(int i = 0; i < MAX_PADS; i++){
         memset(trkEchoBuf[i], 0, sizeof(trkEchoBuf[i]));
-        memset(trkFlgBuf[i],  0, sizeof(trkFlgBuf[i]));
+        trkFlanger[i].Init(sr);
+        ConfigureTrackFlanger((uint8_t)i);
     }
 
     /* ── Mega Upgrade: init new master FX modules ── */
@@ -6876,6 +7076,11 @@ int main()
         InitFX();
 
     /* ── Cargar WAVs desde QSPI Flash (blob en 0x900C0000) → SDRAM ── */
+    if(kStartupStressReport)
+    {
+        Log("StressReport: sample preload omitido (QSPI/SD no requerido)");
+    }
+    else
     {
         /* El blob se flashea con pack_wavs.py + dfu-util a 0x900C0000.
          * IMPORTANTE: app vive en 0x90040000 (BOOT_SRAM copia 512KB a SRAM),
@@ -6981,7 +7186,7 @@ int main()
     /* ── SD boot load ──
      * Si no hay blob QSPI usable, intentamos recuperar el kit por defecto
      * desde /data en la microSD para evitar un arranque completamente mudo. */
-    if(loadedCount == 0)
+    if(!kStartupStressReport && loadedCount == 0)
     {
         Log("Sin samples en QSPI: intentando init SD + autoload...");
         sdOk = InitSD();
@@ -7071,6 +7276,7 @@ int main()
 
     Log("STARTUP TONE TEST: tono 1kHz durante 3s (kStartupToneTest=true)");
     Log("STARTUP SELF-TEST: DESACTIVADO (modo slave listo para master)");
+    BeginStartupStressReport(hw.system.GetNow());
 
     /* ── Main loop ── */
     while(1){
@@ -7151,6 +7357,8 @@ int main()
         /* ── LED diagnóstico ── */
         uint32_t now = hw.system.GetNow();
         RunStartup808SelfTest(now);
+        RunStartupStressReport(now);
+        RunPerformanceStressMode(now);
         if(kStartupToneTest)
             hw.SetLed(((now / 125u) & 1u) != 0u);
         else

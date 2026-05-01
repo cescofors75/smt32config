@@ -187,6 +187,9 @@ public:
 
     /* ── Main DSP — call once per sample from AudioCallback ──────── */
     float Process() {
+        if(ActiveVoiceCount() == 0)
+            return 0.0f;
+
         /* Advance global LFO */
         float lfoVal = 0.0f;
         if(lfoDepth_ > 0.001f) {
@@ -299,6 +302,8 @@ public:
         for(int i = 0; i < WT_MAX_VOICES; i++) if(voices_[i].active) c++;
         return c;
     }
+
+    bool IsActive() const { return ActiveVoiceCount() > 0; }
 
     float GetWavePos() const { return globalWavePos_; }
 

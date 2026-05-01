@@ -79,6 +79,10 @@ static inline float MidiToFreq(uint8_t note) {
     return 440.0f * powf(2.0f, ((float)note - 69.0f) / 12.0f);
 }
 
+static inline float SemitoneRatio(float semitones) {
+    return expf(semitones * 0.057762265f); /* ln(2) / 12 */
+}
+
 /** PolyBLEP anti-aliasing para discontinuidades de oscilador */
 static inline float PolyBlep(float phase, float dt) {
     if (phase < dt) {
@@ -471,9 +475,11 @@ public:
             }
         }
 
-        float driftSemitones = drift_.Process(params.drift);
-        float freq = currentFreq_
-            * powf(2.0f, (pitchBend_ + driftSemitones) / 12.0f);
+        float freq = currentFreq_;
+        if (pitchBend_ != 0.0f || params.drift > 0.001f) {
+            float driftSemitones = drift_.Process(params.drift);
+            freq *= SemitoneRatio(pitchBend_ + driftSemitones);
+        }
         freq = Clamp(freq, 20.0f, sr_ * 0.45f);
 
         float phaseDt = freq * dt_;

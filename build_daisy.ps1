@@ -3,7 +3,9 @@ param(
     [string]$ToolchainBin,
     [string]$MakeBin,
     [switch]$Clean,
-    [switch]$VerboseBuild
+    [switch]$VerboseBuild,
+    [switch]$StressReport,
+    [int]$StressSeconds = 18
 )
 
 $ErrorActionPreference = 'Stop'
@@ -80,9 +82,19 @@ try {
         if($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     }
 
-    $args = @()
-    if($VerboseBuild) { $args += 'VERBOSE=1' }
-    & $makeCmd.Source @args
+    if($StressReport -and -not $Clean) {
+        Write-Host "StressReport: limpiando objetos para aplicar macros de diagnostico..." -ForegroundColor Yellow
+        & $makeCmd.Source clean
+        if($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    }
+
+    $makeArgs = @()
+    if($VerboseBuild) { $makeArgs += 'VERBOSE=1' }
+    if($StressReport) {
+        $makeArgs += 'RED808_STARTUP_STRESS_REPORT=1'
+        $makeArgs += "RED808_STARTUP_STRESS_SECONDS=$StressSeconds"
+    }
+    & $makeCmd.Source @makeArgs
     exit $LASTEXITCODE
 }
 finally {

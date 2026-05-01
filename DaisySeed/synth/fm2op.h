@@ -64,6 +64,10 @@ static inline float MidiToHz(uint8_t note) {
     return 440.0f * powf(2.0f, ((float)note - 69.0f) / 12.0f);
 }
 
+static inline float SemitoneRatio(float cents) {
+    return expf(cents * 0.00057762265f); /* ln(2) / 1200 */
+}
+
 /* ─────────────────────────────────────────────────────────────────
  *  ADSR con curva RC exponencial (caracter analogico - A1)
  * ───────────────────────────────────────────────────────────────── */
@@ -155,12 +159,14 @@ public:
         modFbBuf_  = 0.0f;
         velocity_  = 1.0f;
         baseFreq_  = MidiToHz(60);
+        UpdateCachedFreqs();
         carEnv_.Init(sr);
         modEnv_.Init(sr);
     }
 
     void NoteOn(uint8_t midiNote, float velocity = 1.0f) {
         baseFreq_  = MidiToHz(midiNote);
+        UpdateCachedFreqs();
         velocity_  = Clamp(velocity, 0.0f, 1.0f);
         carPhase_  = 0.0f;
         modPhase_  = 0.0f;
@@ -178,14 +184,6 @@ public:
     float Process() {
         if (!active_) return 0.0f;
 
-        /* ── Detune en frecuencia ── */
-        float detuneMult = (params.detune != 0.0f)
-            ? powf(2.0f, params.detune / 1200.0f)
-            : 1.0f;
-
-        float carFreq = baseFreq_ * detuneMult;
-        float modFreq = carFreq * params.ratio;
-
         /* ── Envelopes ── */
         float cEnv = carEnv_.Process(params.cAtk, params.cDec, params.cSus, params.cRel);
         float mEnv = modEnv_.Process(params.mAtk, params.mDec, params.mSus, params.mRel);
@@ -200,10 +198,10 @@ public:
         modFbBuf_ = (modFbBuf_ * 0.5f) + (modOsc * 0.5f); /* lowpass suave */
 
         /* ── Phase advance ── */
-        modPhase_ += modFreq * dt_;
+        modPhase_ += modFreq_ * dt_;
         if (modPhase_ >= 1.0f) modPhase_ -= 1.0f;
 
-        carPhase_ += carFreq * dt_;
+        carPhase_ += carFreq_ * dt_;
         if (carPhase_ >= 1.0f) carPhase_ -= 1.0f;
 
         /* ── Carrier output segun algoritmo ── */
@@ -247,17 +245,23 @@ public:
             case  5: params.mDec     = Clamp(val, 0.01f,  5.0f);  break;
             case  6: params.mSus     = Clamp(val, 0.0f,   1.0f);  break;
             case  7: params.mRel     = Clamp(val, 0.005f, 3.0f);  break;
-            case  8: params.ratio    = Clamp(val, 0.5f,   16.0f); break;
+            case  8: params.ratio    = Clamp(val, 0.5f,   16.0f); UpdateCachedFreqs(); break;
             case  9: params.index    = Clamp(val, 0.0f,   20.0f); break;
             case 10: params.feedback = Clamp(val, 0.0f,   1.0f);  break;
             case 11: params.algo     = (uint8_t)Clamp(val, 0.0f, 2.0f); break;
-            case 12: params.detune   = Clamp(val, -50.0f, 50.0f); break;
+            case 12: params.detune   = Clamp(val, -50.0f, 50.0f); UpdateCachedFreqs(); break;
             case 13: params.velSens  = Clamp(val, 0.0f,   1.0f);  break;
             case 14: params.volume   = Clamp(val, 0.0f,   1.0f);  break;
         }
     }
 
 private:
+    void UpdateCachedFreqs() {
+        const float detuneMult = (params.detune != 0.0f) ? SemitoneRatio(params.detune) : 1.0f;
+        carFreq_ = baseFreq_ * detuneMult;
+        modFreq_ = carFreq_ * params.ratio;
+    }
+
     float    sr_       = 48000.0f;
     float    dt_       = 1.0f / 48000.0f;
     bool     active_   = false;
@@ -266,6 +270,8 @@ private:
     float    modFbBuf_ = 0.0f;
     float    velocity_ = 1.0f;
     float    baseFreq_ = 261.63f;
+    float    carFreq_  = 261.63f;
+    float    modFreq_  = 261.63f;
     Adsr     carEnv_;
     Adsr     modEnv_;
 };
