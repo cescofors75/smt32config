@@ -92,7 +92,7 @@ static CpuLoadMeter audioLoadMeter;
 #endif
 #define MAX_PADS           24
 #define MAX_VOICES         32
-#define MAX_SAMPLE_BYTES   (96000 * 2)   /* ~2.0 s per pad @ 48000  */
+#define MAX_SAMPLE_BYTES   (2 * 1024 * 1024)   /* 2 MB per pad = ~22 s @ 48000 */
 #define MAX_DELAY_SAMPLES  96000         /* 2 s @ 48000             */
 #define TRACK_ECHO_SIZE    9600          /* 200 ms per track        */
 
