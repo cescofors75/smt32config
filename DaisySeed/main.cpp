@@ -2362,6 +2362,7 @@ static void ApplyDrumSynthParam(uint8_t engine, uint8_t instrument, uint8_t para
                     if(paramId==4) synth808.kick.subLevel  = clampF(val,0.f,0.5f);
                     if(paramId==5) synth808.kick.pitchAmt  = clampF(val,1.f,20.f);
                     if(paramId==6) synth808.kick.SetPitchDecay(val);
+                    if(paramId==7) synth808.kick.punchAmt  = clampF(val,0.f,2.5f);
                     break;
                 case TR808::INST_SNARE:
                     if(paramId==0) synth808.snare.SetDecay(val);
@@ -2605,7 +2606,7 @@ static void ApplyFm2OpPreset(uint8_t presetId)
 
 static void ApplySynthPreset(uint8_t engine, uint8_t presetId)
 {
-    uint8_t preset = (presetId < 4) ? presetId : 0;
+    uint8_t preset = (presetId < 5) ? presetId : 0;
 
     switch(engine)
     {
@@ -2656,6 +2657,36 @@ static void ApplySynthPreset(uint8_t engine, uint8_t presetId)
                     set(TR808::INST_HI_TOM, 0, 0.34f); set(TR808::INST_HI_TOM, 1, 215.0f); set(TR808::INST_HI_TOM, 5, 0.10f); set(TR808::INST_HI_TOM, 3, 0.92f);
                     synth808.SetVolume(TR808::INST_LOW_CONGA, 0.92f); synth808.SetVolume(TR808::INST_MID_CONGA, 0.96f); synth808.SetVolume(TR808::INST_HI_CONGA, 1.00f);
                     synth808.SetVolume(TR808::INST_CLAVES, 0.96f); synth808.SetVolume(TR808::INST_MARACAS, 0.78f); synth808.SetVolume(TR808::INST_RIMSHOT, 0.82f);
+                    break;
+                case 4: /* Pure 808 — fiel al hardware analogico original */
+                    synth808.LoadPreset(TR808::Presets::Pure808);
+                    /* Kick: sin sub-osc, drive minimo, sweep corto 1:1, sin drift, punch reducido */
+                    synth808.kick.SetDecay(0.45f);
+                    synth808.kick.SetPitch(52.0f);
+                    synth808.kick.drive     = 0.05f;
+                    synth808.kick.subLevel  = 0.0f;
+                    synth808.kick.pitchAmt  = 1.0f;
+                    synth808.kick.pitchDecay= 0.05f;
+                    synth808.kick.punchAmt  = 0.4f;
+                    synth808.kick.drift     = 0.0f;
+                    synth808.kick.volume    = 0.92f;
+                    /* Snare: dos tonos no-armonicos del datasheet, sin drift */
+                    synth808.snare.SetDecay(0.18f);
+                    synth808.snare.SetPitch(180.0f);
+                    synth808.snare.SetTone(0.50f);
+                    synth808.snare.SetSnappy(0.50f);
+                    synth808.snare.drift  = 0.0f;
+                    synth808.snare.volume = 0.85f;
+                    /* Clap, hihats, cowbell, cymbal: defaults clasicos */
+                    set(TR808::INST_CLAP,    0, 0.28f); set(TR808::INST_CLAP,    2, 0.60f); set(TR808::INST_CLAP,    3, 0.85f);
+                    set(TR808::INST_HIHAT_C, 0, 0.025f); set(TR808::INST_HIHAT_C, 3, 0.85f);
+                    set(TR808::INST_HIHAT_O, 0, 0.18f);  set(TR808::INST_HIHAT_O, 3, 0.80f);
+                    set(TR808::INST_COWBELL, 0, 0.08f); set(TR808::INST_COWBELL, 1, 1.0f); set(TR808::INST_COWBELL, 3, 0.75f);
+                    set(TR808::INST_CYMBAL,  0, 0.85f); set(TR808::INST_CYMBAL,  3, 0.70f);
+                    /* Toms y congas: niveles equilibrados */
+                    set(TR808::INST_LOW_TOM, 0, 0.30f); set(TR808::INST_LOW_TOM, 1, 75.0f);  set(TR808::INST_LOW_TOM, 5, 0.0f); set(TR808::INST_LOW_TOM, 3, 0.80f);
+                    set(TR808::INST_MID_TOM, 0, 0.30f); set(TR808::INST_MID_TOM, 1, 120.0f); set(TR808::INST_MID_TOM, 5, 0.0f); set(TR808::INST_MID_TOM, 3, 0.80f);
+                    set(TR808::INST_HI_TOM,  0, 0.30f); set(TR808::INST_HI_TOM,  1, 175.0f); set(TR808::INST_HI_TOM,  5, 0.0f); set(TR808::INST_HI_TOM,  3, 0.80f);
                     break;
             }
             break;
@@ -2720,6 +2751,19 @@ static void ApplySynthPreset(uint8_t engine, uint8_t presetId)
                     set(TR909::INST_RIDE, 0, 1.40f); set(TR909::INST_RIDE, 3, 0.66f);
                     set(TR909::INST_CRASH, 0, 1.80f); set(TR909::INST_CRASH, 3, 0.82f);
                     break;
+                case 4: /* Pure 909 — fiel al hardware original (kick beater click claro, sin saturacion) */
+                    synth909.LoadPreset(TR909::Presets::Pure909);
+                    set(TR909::INST_KICK,    0, 0.40f); set(TR909::INST_KICK,    1, 50.0f);  set(TR909::INST_KICK,    3, 0.92f);
+                    set(TR909::INST_SNARE,   0, 0.20f); set(TR909::INST_SNARE,   2, 0.55f);  set(TR909::INST_SNARE,   4, 0.55f); set(TR909::INST_SNARE,   3, 0.88f);
+                    set(TR909::INST_CLAP,    0, 0.28f); set(TR909::INST_CLAP,    3, 0.82f);
+                    set(TR909::INST_HIHAT_C, 0, 0.022f);set(TR909::INST_HIHAT_C, 3, 0.90f);
+                    set(TR909::INST_HIHAT_O, 0, 0.18f); set(TR909::INST_HIHAT_O, 3, 0.85f);
+                    set(TR909::INST_LOW_TOM, 0, 0.30f); set(TR909::INST_LOW_TOM, 1, 80.0f);  set(TR909::INST_LOW_TOM, 3, 0.80f);
+                    set(TR909::INST_MID_TOM, 0, 0.30f); set(TR909::INST_MID_TOM, 1, 120.0f); set(TR909::INST_MID_TOM, 3, 0.80f);
+                    set(TR909::INST_HI_TOM,  0, 0.30f); set(TR909::INST_HI_TOM,  1, 180.0f); set(TR909::INST_HI_TOM,  3, 0.80f);
+                    set(TR909::INST_RIDE,    0, 0.55f); set(TR909::INST_RIDE,    3, 0.78f);
+                    set(TR909::INST_CRASH,   0, 0.85f); set(TR909::INST_CRASH,   3, 0.75f);
+                    break;
             }
             break;
         }
@@ -2777,6 +2821,19 @@ static void ApplySynthPreset(uint8_t engine, uint8_t presetId)
                     set(TR505::INST_HI_TOM, 0, 0.30f); set(TR505::INST_HI_TOM, 1, 168.0f); set(TR505::INST_HI_TOM, 3, 0.74f);
                     set(TR505::INST_COWBELL, 0, 0.08f); set(TR505::INST_COWBELL, 3, 0.44f);
                     set(TR505::INST_CYMBAL, 0, 1.10f); set(TR505::INST_CYMBAL, 3, 0.50f);
+                    break;
+                case 4: /* Pure 505 — fiel al original (sample-based digital limpio, sin lofi) */
+                    synth505.LoadPreset(TR505::Presets::Pure505);
+                    set(TR505::INST_KICK,    0, 0.40f); set(TR505::INST_KICK,    1, 55.0f);  set(TR505::INST_KICK,    3, 0.90f);
+                    set(TR505::INST_SNARE,   0, 0.25f); set(TR505::INST_SNARE,   2, 0.55f);  set(TR505::INST_SNARE,   3, 0.88f);
+                    set(TR505::INST_CLAP,    0, 0.28f); set(TR505::INST_CLAP,    3, 0.82f);
+                    set(TR505::INST_HIHAT_C, 0, 0.025f);set(TR505::INST_HIHAT_C, 3, 0.92f);
+                    set(TR505::INST_HIHAT_O, 0, 0.20f); set(TR505::INST_HIHAT_O, 3, 0.86f);
+                    set(TR505::INST_LOW_TOM, 0, 0.30f); set(TR505::INST_LOW_TOM, 1, 80.0f);  set(TR505::INST_LOW_TOM, 3, 0.80f);
+                    set(TR505::INST_MID_TOM, 0, 0.30f); set(TR505::INST_MID_TOM, 1, 120.0f); set(TR505::INST_MID_TOM, 3, 0.80f);
+                    set(TR505::INST_HI_TOM,  0, 0.30f); set(TR505::INST_HI_TOM,  1, 180.0f); set(TR505::INST_HI_TOM,  3, 0.80f);
+                    set(TR505::INST_COWBELL, 0, 0.10f); set(TR505::INST_COWBELL, 3, 0.78f);
+                    set(TR505::INST_CYMBAL,  0, 0.80f); set(TR505::INST_CYMBAL,  3, 0.74f);
                     break;
             }
             break;
@@ -4275,10 +4332,68 @@ static void ProcessCommand()
             uint8_t pad = p[0];
             if(kAcceptOneBasedPadIndex && pad > 0) pad -= 1;
             uint32_t maxS = 0; memcpy(&maxS, p + 4, 4);
-            TriggerPad(pad, p[1], p[2], (int8_t)p[3], maxS, seqVolume);
+            /* Si el track tiene un synth engine asignado, enrutar al synth
+             * en vez de al sampler (mismo comportamiento que CMD_TRIGGER_LIVE).
+             * Sin esto, los pads con 303/WT/SH101/FM2 no sonarian en el
+             * sequencer del Master. */
+            int8_t seqEng = (pad < DSQ_TRACKS) ? dsqTrackEngine[pad] : -1;
+            if(seqEng >= 0 && seqEng < SYNTH_ENGINE_COUNT){
+                float fvel = clampF(p[1] / 127.0f, 0.0f, 1.0f);
+                switch(seqEng){
+                    case SYNTH_ENGINE_808:
+                        if(pad < 16) synth808.Trigger(padTo808[pad], fvel);
+                        break;
+                    case SYNTH_ENGINE_909:
+                        if(pad < 16) synth909.Trigger(padTo909[pad], fvel);
+                        break;
+                    case SYNTH_ENGINE_505:
+                        if(pad < 16) synth505.Trigger(padTo505[pad], fvel);
+                        break;
+                    case SYNTH_ENGINE_303: {
+                        uint8_t note = (pad < 16) ? padTo303Midi[pad] : 48;
+                        bool    acc  = (fvel > 0.85f);
+                        acid303.NoteOn(note, acc, false);
+                        break;
+                    }
+                    case SYNTH_ENGINE_WTOSC: {
+                        uint8_t note = (pad < 16) ? trackWtNote[pad] : 60;
+                        wtOsc.NoteOn(note, fvel);
+                        break;
+                    }
+                    case SYNTH_ENGINE_SH101: {
+                        uint8_t note = (pad < 16) ? trackSH101Note[pad] : 60;
+                        synthSH101.NoteOn(note, fvel);
+                        break;
+                    }
+                    case SYNTH_ENGINE_FM2OP: {
+                        uint8_t note = (pad < 16) ? trackFM2OpNote[pad] : 60;
+                        synthFM2Op.NoteOn(note, fvel);
+                        break;
+                    }
+                    case SYNTH_ENGINE_PHYS: {
+                        float freq = 440.f * powf(2.f, ((pad < 16 ? trackWtNote[pad] : 60) - 69) / 12.f);
+                        physModal.SetFreq(freq);
+                        physString.SetFreq(freq);
+                        physModal.SetAccent(fvel);
+                        physString.SetAccent(fvel);
+                        physModalActive = true;
+                        physStringActive = true;
+                        break;
+                    }
+                    case SYNTH_ENGINE_NOISE: {
+                        float freq = 440.f * powf(2.f, ((pad < 16 ? trackWtNote[pad] : 60) - 69) / 12.f);
+                        noisePart.SetFreq(freq);
+                        noisePart.SetDensity(0.5f + fvel * 0.5f);
+                        noisePartActive = true;
+                        break;
+                    }
+                }
+            } else {
+                TriggerPad(pad, p[1], p[2], (int8_t)p[3], maxS, seqVolume);
+                if(kTriggerSynthOnLiveCmd)
+                    Synth808TriggerByPad(pad, clampF(p[1] / 127.0f, 0.0f, 1.0f));
+            }
             spiLastTriggerMs = hw.system.GetNow();
-            if(kTriggerSynthOnLiveCmd)
-                Synth808TriggerByPad(pad, clampF(p[1] / 127.0f, 0.0f, 1.0f));
         }
         break;
 
@@ -5816,7 +5931,62 @@ static void ProcessCommand()
                 int8_t   pan = (int8_t)tp[off + 3];
                 uint32_t maxS = 0;
                 memcpy(&maxS, tp + off + 4, 4);
-                TriggerPad(pad, vel, tvol, pan, maxS, seqVolume);
+                /* Routing: si el track tiene synth engine asignado, dispara
+                 * el synth correspondiente (igual que CMD_TRIGGER_LIVE/SEQ). */
+                int8_t bEng = (pad < DSQ_TRACKS) ? dsqTrackEngine[pad] : -1;
+                if(bEng >= 0 && bEng < SYNTH_ENGINE_COUNT){
+                    float fvel = clampF(vel / 127.0f, 0.0f, 1.0f);
+                    switch(bEng){
+                        case SYNTH_ENGINE_808:
+                            if(pad < 16) synth808.Trigger(padTo808[pad], fvel);
+                            break;
+                        case SYNTH_ENGINE_909:
+                            if(pad < 16) synth909.Trigger(padTo909[pad], fvel);
+                            break;
+                        case SYNTH_ENGINE_505:
+                            if(pad < 16) synth505.Trigger(padTo505[pad], fvel);
+                            break;
+                        case SYNTH_ENGINE_303: {
+                            uint8_t note = (pad < 16) ? padTo303Midi[pad] : 48;
+                            acid303.NoteOn(note, fvel > 0.85f, false);
+                            break;
+                        }
+                        case SYNTH_ENGINE_WTOSC: {
+                            uint8_t note = (pad < 16) ? trackWtNote[pad] : 60;
+                            wtOsc.NoteOn(note, fvel);
+                            break;
+                        }
+                        case SYNTH_ENGINE_SH101: {
+                            uint8_t note = (pad < 16) ? trackSH101Note[pad] : 60;
+                            synthSH101.NoteOn(note, fvel);
+                            break;
+                        }
+                        case SYNTH_ENGINE_FM2OP: {
+                            uint8_t note = (pad < 16) ? trackFM2OpNote[pad] : 60;
+                            synthFM2Op.NoteOn(note, fvel);
+                            break;
+                        }
+                        case SYNTH_ENGINE_PHYS: {
+                            float freq = 440.f * powf(2.f, ((pad < 16 ? trackWtNote[pad] : 60) - 69) / 12.f);
+                            physModal.SetFreq(freq);
+                            physString.SetFreq(freq);
+                            physModal.SetAccent(fvel);
+                            physString.SetAccent(fvel);
+                            physModalActive = true;
+                            physStringActive = true;
+                            break;
+                        }
+                        case SYNTH_ENGINE_NOISE: {
+                            float freq = 440.f * powf(2.f, ((pad < 16 ? trackWtNote[pad] : 60) - 69) / 12.f);
+                            noisePart.SetFreq(freq);
+                            noisePart.SetDensity(0.5f + fvel * 0.5f);
+                            noisePartActive = true;
+                            break;
+                        }
+                    }
+                } else {
+                    TriggerPad(pad, vel, tvol, pan, maxS, seqVolume);
+                }
             }
             spiLastTriggerMs = hw.system.GetNow();
         }

@@ -851,6 +851,10 @@ static const KitPreset Industrial = { "Industrial",
     { 1.2f, 1.1f, 0.8f, 1.0f, 0.9f, 0.7f, 0.7f, 0.7f, 0.5f, 0.8f, 0.7f }
 };
 
+static const KitPreset Pure909 = { "Pure 909",
+    { 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f }
+};
+
 } /* namespace Presets */
 
 /* =====================================================================

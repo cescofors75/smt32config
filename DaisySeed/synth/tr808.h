@@ -181,6 +181,7 @@ public:
     float subLevel   = 0.15f;
     float volume     = 1.0f;
     float drift      = 0.15f;  /* A4: analog pitch drift [0..1] */
+    float punchAmt   = 1.8f;   /* Pure: 0.0-2.0, click-transient gain */
 
     void Init(float sampleRate) {
         sr_ = sampleRate;
@@ -230,7 +231,7 @@ public:
         float sub = sinf(TR808_TWOPI * subPhase_) * subLevel;
 
         float punchEnv = expf(-time_ / 0.0008f);
-        float punch    = punchEnv * 1.8f;
+        float punch    = punchEnv * punchAmt;
 
         float clickEnv = expf(-time_ / attack);
         float click    = clickFilter_.ProcessBP(rng_.White()) * clickEnv * 0.6f;
@@ -992,6 +993,11 @@ static const KitPreset Techno = { "Techno",
 static const KitPreset Latin = { "Latin",
     { 0.7f, 0.6f, 0.4f, 0.5f, 0.5f, 0.8f, 0.8f, 0.9f,
       1.0f, 1.0f, 1.1f, 1.1f, 0.8f, 0.8f, 0.7f, 0.4f }
+};
+
+static const KitPreset Pure808 = { "Pure 808",
+    { 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f,
+      1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f }
 };
 
 } /* namespace Presets */

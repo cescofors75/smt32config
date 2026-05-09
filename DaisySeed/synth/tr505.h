@@ -938,6 +938,12 @@ static const KitPreset LoFiHipHop = { "Lo-Fi Hip-Hop",
     0.65f
 };
 
+/* Pure 505: sin lofi, fiel al original digital limpio */
+static const KitPreset Pure505 = { "Pure 505",
+    { 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f },
+    0.0f
+};
+
 } /* namespace Presets */
 
 /* =====================================================================
