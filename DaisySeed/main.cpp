@@ -2604,6 +2604,44 @@ static void ApplyFm2OpPreset(uint8_t presetId)
     }
 }
 
+static void ApplyPhysPreset(uint8_t presetId)
+{
+    auto set = [](uint8_t paramId, float value) {
+        switch(paramId)
+        {
+            case 1: physModal.SetStructure(clampF(value, 0.f, 1.f));   break;
+            case 2: physModal.SetBrightness(clampF(value, 0.f, 1.f));  break;
+            case 3: physModal.SetDamping(clampF(value, 0.f, 1.f));     break;
+            case 4: physModalGain = clampF(value, 0.f, 1.f);           break;
+            case 6: physString.SetStructure(clampF(value, 0.f, 1.f));  break;
+            case 7: physString.SetBrightness(clampF(value, 0.f, 1.f)); break;
+            case 8: physString.SetDamping(clampF(value, 0.f, 1.f));    break;
+            case 9: physStringGain = clampF(value, 0.f, 1.f);          break;
+        }
+    };
+
+    switch(presetId)
+    {
+        default:
+        case 0: /* Clasica */
+            set(1, 0.10f); set(2, 0.22f); set(3, 0.84f); set(4, 0.10f);
+            set(6, 0.30f); set(7, 0.42f); set(8, 0.72f); set(9, 0.92f);
+            break;
+        case 1: /* Flamenco */
+            set(1, 0.16f); set(2, 0.54f); set(3, 0.62f); set(4, 0.11f);
+            set(6, 0.26f); set(7, 0.70f); set(8, 0.46f); set(9, 0.96f);
+            break;
+        case 2: /* Funky */
+            set(1, 0.28f); set(2, 0.66f); set(3, 0.48f); set(4, 0.08f);
+            set(6, 0.56f); set(7, 0.86f); set(8, 0.26f); set(9, 0.82f);
+            break;
+        case 3: /* Electrica */
+            set(1, 0.32f); set(2, 0.82f); set(3, 0.34f); set(4, 0.14f);
+            set(6, 0.52f); set(7, 0.96f); set(8, 0.18f); set(9, 0.88f);
+            break;
+    }
+}
+
 static void ApplySynthPreset(uint8_t engine, uint8_t presetId)
 {
     uint8_t preset = (presetId < 5) ? presetId : 0;
@@ -2969,6 +3007,9 @@ static void ApplySynthPreset(uint8_t engine, uint8_t presetId)
         case SYNTH_ENGINE_FM2OP:
             ApplyFm2OpPreset(preset);
             break;
+        case SYNTH_ENGINE_PHYS:
+            ApplyPhysPreset(preset);
+            break;
         default:
             break;
     }
@@ -2983,6 +3024,7 @@ static void ApplyDefaultSynthPresets()
     ApplySynthPreset(SYNTH_ENGINE_WTOSC, 0);
     ApplySynthPreset(SYNTH_ENGINE_SH101, 0);
     ApplySynthPreset(SYNTH_ENGINE_FM2OP, 0);
+    ApplySynthPreset(SYNTH_ENGINE_PHYS, 0);
 }
 
 /* ═══════════════════════════════════════════════════════════════════
@@ -5723,6 +5765,26 @@ static void ProcessCommand()
                 case SYNTH_ENGINE_505:
                     ApplyDrumSynthParam(engine, instrument, paramId, val);
                     break;
+                case SYNTH_ENGINE_303:
+                    switch(paramId){
+                        case 0: acid303.SetCutoff(val);    break;
+                        case 1: acid303.SetResonance(val); break;
+                        case 2: acid303.SetEnvMod(val);    break;
+                        case 3: acid303.SetDecay(val);     break;
+                        case 4: acid303.SetAccent(val);    break;
+                        case 5: acid303.SetSlide(val);     break;
+                        case 6: acid303.SetWaveform(val < 0.5f ? TB303::WAVE_SAW : TB303::WAVE_SQUARE); break;
+                        case 7: acid303.SetVolume(val);    break;
+                        case 8: acid303.SetAttack(val);    break;
+                        case 9: acid303.SetSustain(val);   break;
+                        case 10: acid303.SetRelease(val);  break;
+                        case 11: acid303.SetOverdrive(val); break;
+                        case 12: acid303.SetSubLevel(val); break;
+                        case 13: acid303.SetDrift(val);    break;
+                        case 14: acid303.SetPitchBend(val); break;
+                        default: break;
+                    }
+                    break;
                 case SYNTH_ENGINE_WTOSC:
                     switch(paramId){
                         case 0: wtOsc.SetWavePos(val);                           break;
@@ -5809,14 +5871,20 @@ static void ProcessCommand()
         if(len >= 2){
             uint8_t engine = p[0];
             uint8_t track  = p[1];
+            uint8_t note   = (len >= 3) ? p[2] : 0xFF;
             switch(engine){
                 case SYNTH_ENGINE_303:   acid303.NoteOff(); break;
                 case SYNTH_ENGINE_WTOSC:
-                    if(track < 16) wtOsc.NoteOff(trackWtNote[track]);
+                    if(note != 0xFF)     wtOsc.NoteOff(note);
+                    else if(track < 16)  wtOsc.NoteOff(trackWtNote[track]);
                     else           wtOsc.AllNotesOff();
                     break;
                 case SYNTH_ENGINE_SH101: synthSH101.NoteOff(); break;
                 case SYNTH_ENGINE_FM2OP: synthFM2Op.NoteOff(); break;
+                case SYNTH_ENGINE_PHYS:
+                    physModalActive = false;
+                    physStringActive = false;
+                    break;
                 default: break;
             }
         } else {
@@ -5825,6 +5893,8 @@ static void ProcessCommand()
             synthSH101.NoteOff();
             synthFM2Op.NoteOff();
             wtOsc.AllNotesOff();
+            physModalActive = false;
+            physStringActive = false;
         }
         break;
 
@@ -5910,6 +5980,25 @@ static void ProcessCommand()
                 case SYNTH_ENGINE_FM2OP:
                     synthFM2Op.NoteOn(midiNote, vel01);
                     break;
+                case SYNTH_ENGINE_PHYS: {
+                    float freq = 440.f * powf(2.f, (midiNote - 69) / 12.f);
+                    physModal.SetFreq(freq);
+                    physString.SetFreq(freq);
+                    physModal.SetAccent(vel01);
+                    physString.SetAccent(vel01);
+                    physModal.Trig();
+                    physString.Trig();
+                    physModalActive = true;
+                    physStringActive = true;
+                    break;
+                }
+                case SYNTH_ENGINE_NOISE: {
+                    float freq = 440.f * powf(2.f, (midiNote - 69) / 12.f);
+                    noisePart.SetFreq(freq);
+                    noisePart.SetDensity(0.5f + vel01 * 0.5f);
+                    noisePartActive = true;
+                    break;
+                }
                 default:
                     break;
             }
