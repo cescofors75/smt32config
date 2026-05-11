@@ -5,9 +5,10 @@
  *  Mas agresiva que la 808: kick con mas punch, snare mas brillante,
  *  hihats mas digitales, ride y crash con caracter propio.
  *
- *  INSTRUMENTOS (11):
+ *  INSTRUMENTOS (16):
  *    Kick  Snare  Clap  HiHatClosed  HiHatOpen
  *    LowTom  MidTom  HiTom  Ride  Crash  RimShot
+ *    Shaker  Clave  HiPerc  MidPerc  LowPerc
  *
  *  DIFERENCIAS CLAVE vs TR-808:
  *    Kick:  pitchAmt x12 (vs x8), pitchDecay mas rapido, mas punch
@@ -804,6 +805,190 @@ private:
 };
 
 /* =====================================================================
+ *  SHAKER / MARACAS 909
+ * ---------------------------------------------------------------------
+ *  Percusion de ruido brillante para completar el slot MA sin duplicar
+ *  clap/rimshot. Mantiene caracter 909: agresivo, corto y presente.
+ * ===================================================================== */
+class Shaker {
+public:
+    float decay  = 0.085f;
+    float tone   = 0.65f;
+    float volume = 1.0f;
+
+    void Init(float sampleRate) {
+        sr_ = sampleRate;
+        dt_ = 1.0f / sr_;
+        active_ = false;
+        noiseF_.SetCoefs(sr_, 5200.0f + tone * 5200.0f, 0.85f);
+        bodyF_.SetCoefs(sr_, 2200.0f + tone * 1800.0f, 1.6f);
+        rng_.Seed(0x9095A01u);
+    }
+
+    void Trigger(float velocity = 1.0f) {
+        active_ = true;
+        time_ = 0.0f;
+        vel_ = VelCurve(velocity);
+        noiseF_.SetCoefs(sr_, 5200.0f + tone * 5200.0f, 0.85f);
+        bodyF_.SetCoefs(sr_, 2200.0f + tone * 1800.0f, 1.6f);
+        noiseF_.Reset();
+        bodyF_.Reset();
+        rng_.Seed(0x9095A01u ^ (uint32_t)(vel_ * 27183));
+    }
+
+    float Process() {
+        if (!active_) return 0.0f;
+        float n = rng_.White();
+        float env = expf(-time_ / decay);
+        float atk = 1.0f - expf(-time_ / 0.0009f);
+        float hp = noiseF_.ProcessHP(n) * (0.85f + tone * 0.65f);
+        float bp = bodyF_.ProcessBP(n) * 0.35f;
+        float out = FastTanh((hp + bp) * atk * env * 2.6f);
+        time_ += dt_;
+        if (env < 0.0005f) active_ = false;
+        return out * volume * vel_;
+    }
+
+    bool IsActive() const { return active_; }
+    void SetDecay(float d) { decay = Clamp(d, 0.02f, 0.45f); }
+    void SetTone(float t)  { tone = Clamp(t, 0.0f, 1.0f); }
+
+private:
+    float sr_ = 48000.0f, dt_ = 1.0f / 48000.0f;
+    bool  active_ = false;
+    float time_ = 0.0f, vel_ = 1.0f;
+    SVF   noiseF_, bodyF_;
+    Rng   rng_;
+};
+
+/* =====================================================================
+ *  CLAVE 909
+ * ---------------------------------------------------------------------
+ *  Resonador corto y duro, separado del rimshot para que el slot CL tenga
+ *  identidad propia en patrones latinos/electro.
+ * ===================================================================== */
+class Clave {
+public:
+    float decay  = 0.055f;
+    float pitch  = 1750.0f;
+    float volume = 1.0f;
+
+    void Init(float sampleRate) {
+        sr_ = sampleRate;
+        dt_ = 1.0f / sr_;
+        active_ = false;
+        resonF_.SetCoefs(sr_, pitch, 9.0f);
+        clickF_.SetCoefs(sr_, 4200.0f, 1.1f);
+        rng_.Seed(0x909C1A5u);
+    }
+
+    void Trigger(float velocity = 1.0f) {
+        active_ = true;
+        time_ = 0.0f;
+        vel_ = VelCurve(velocity);
+        impulse_ = 1.0f;
+        resonF_.SetCoefs(sr_, pitch, 9.0f);
+        resonF_.Reset();
+        clickF_.Reset();
+        rng_.Seed(0x909C1A5u ^ (uint32_t)(vel_ * 17777));
+    }
+
+    float Process() {
+        if (!active_) return 0.0f;
+        float toneEnv = expf(-time_ / decay);
+        float tone = resonF_.ProcessBP(impulse_) * toneEnv;
+        impulse_ = 0.0f;
+        float clickEnv = expf(-time_ / 0.0007f);
+        float click = clickF_.ProcessBP(rng_.White()) * clickEnv * 0.45f;
+        float out = FastTanh((tone + click) * 2.4f);
+        time_ += dt_;
+        if (toneEnv < 0.0005f && clickEnv < 0.0005f) active_ = false;
+        return out * volume * vel_;
+    }
+
+    bool IsActive() const { return active_; }
+    void SetDecay(float d) { decay = Clamp(d, 0.015f, 0.25f); }
+    void SetPitch(float p) { pitch = Clamp(p, 900.0f, 3200.0f); }
+
+private:
+    float sr_ = 48000.0f, dt_ = 1.0f / 48000.0f;
+    bool  active_ = false;
+    float time_ = 0.0f, vel_ = 1.0f, impulse_ = 0.0f;
+    SVF   resonF_, clickF_;
+    Rng   rng_;
+};
+
+/* =====================================================================
+ *  PERC 909 BASE
+ * ---------------------------------------------------------------------
+ *  Tres percusiones tonales que ocupan HC/MC/LC sin clonar toms. Son mas
+ *  cortas, con mas ataque metalico y menos cuerpo que los toms 909.
+ * ===================================================================== */
+class Perc909Base {
+public:
+    float decay  = 0.12f;
+    float pitch  = 520.0f;
+    float metal  = 0.18f;
+    float volume = 1.0f;
+
+    void Init(float sampleRate) {
+        sr_ = sampleRate;
+        dt_ = 1.0f / sr_;
+        active_ = false;
+        bodyF_.SetCoefs(sr_, pitch, 5.5f);
+        metalF_.SetCoefs(sr_, pitch * 3.5f, 1.4f);
+        rng_.Seed(0x9099E01u);
+    }
+
+    void Trigger(float velocity = 1.0f) {
+        active_ = true;
+        time_ = 0.0f;
+        vel_ = VelCurve(velocity);
+        impulse_ = 1.0f;
+        bodyF_.SetCoefs(sr_, pitch, 5.5f);
+        metalF_.SetCoefs(sr_, pitch * 3.5f, 1.4f);
+        bodyF_.Reset();
+        metalF_.Reset();
+        rng_.Seed(0x9099E01u ^ (uint32_t)(vel_ * pitch));
+    }
+
+    float Process() {
+        if (!active_) return 0.0f;
+        float env = expf(-time_ / decay);
+        float body = bodyF_.ProcessBP(impulse_) * env;
+        impulse_ = 0.0f;
+        float slapEnv = expf(-time_ / 0.0035f);
+        float slap = metalF_.ProcessBP(rng_.White()) * slapEnv * metal;
+        float out = FastTanh((body + slap) * 2.0f);
+        time_ += dt_;
+        if (env < 0.0005f && slapEnv < 0.0005f) active_ = false;
+        return out * volume * vel_;
+    }
+
+    bool IsActive() const { return active_; }
+    void SetDecay(float d) { decay = Clamp(d, 0.035f, 0.55f); }
+    void SetPitch(float p) { pitch = Clamp(p, 160.0f, 1600.0f); }
+    void SetMetal(float m) { metal = Clamp(m, 0.0f, 1.0f); }
+
+protected:
+    float sr_ = 48000.0f, dt_ = 1.0f / 48000.0f;
+    bool  active_ = false;
+    float time_ = 0.0f, vel_ = 1.0f, impulse_ = 0.0f;
+    SVF   bodyF_, metalF_;
+    Rng   rng_;
+};
+
+class HiPerc : public Perc909Base {
+public: HiPerc() { pitch = 820.0f; decay = 0.085f; metal = 0.28f; }
+};
+class MidPerc : public Perc909Base {
+public: MidPerc() { pitch = 520.0f; decay = 0.120f; metal = 0.20f; }
+};
+class LowPerc : public Perc909Base {
+public: LowPerc() { pitch = 310.0f; decay = 0.170f; metal = 0.14f; }
+};
+
+/* =====================================================================
  *  INSTRUMENT IDs
  * ===================================================================== */
 enum InstrumentId : uint8_t {
@@ -818,6 +1003,11 @@ enum InstrumentId : uint8_t {
     INST_RIDE,
     INST_CRASH,
     INST_RIMSHOT,
+    INST_SHAKER,
+    INST_CLAVE,
+    INST_HI_PERC,
+    INST_MID_PERC,
+    INST_LOW_PERC,
     INST_COUNT
 };
 
@@ -833,26 +1023,31 @@ namespace Presets {
 
 /* Todos los instrumentos al mismo nivel -- como sale de fabrica */
 static const KitPreset Classic909 = { "Classic 909",
-    { 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f }
+        { 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f,
+            1.0f, 1.0f, 1.0f, 0.90f, 0.92f, 0.88f, 0.90f, 0.92f }
 };
 
 /* Techno: kick y hihat dominan, snare presente, poco crash */
 static const KitPreset Techno = { "Techno",
-    { 1.2f, 1.0f, 0.5f, 0.9f, 0.8f, 0.5f, 0.5f, 0.5f, 0.7f, 0.3f, 0.4f }
+        { 1.2f, 1.0f, 0.5f, 0.9f, 0.8f, 0.5f, 0.5f, 0.5f,
+            0.7f, 0.3f, 0.4f, 0.82f, 0.70f, 0.55f, 0.58f, 0.60f }
 };
 
 /* House: kick gordo, hihat suave, clap en el 2 y 4 */
 static const KitPreset HousePound = { "House Pound",
-    { 1.1f, 0.8f, 1.0f, 0.6f, 0.7f, 0.6f, 0.6f, 0.6f, 0.8f, 0.4f, 0.5f }
+        { 1.1f, 0.8f, 1.0f, 0.6f, 0.7f, 0.6f, 0.6f, 0.6f,
+            0.8f, 0.4f, 0.5f, 0.62f, 0.55f, 0.52f, 0.56f, 0.60f }
 };
 
 /* Industrial: agresivo, todo fuerte, crash y crash largo */
 static const KitPreset Industrial = { "Industrial",
-    { 1.2f, 1.1f, 0.8f, 1.0f, 0.9f, 0.7f, 0.7f, 0.7f, 0.5f, 0.8f, 0.7f }
+        { 1.2f, 1.1f, 0.8f, 1.0f, 0.9f, 0.7f, 0.7f, 0.7f,
+            0.5f, 0.8f, 0.7f, 1.00f, 0.90f, 0.82f, 0.84f, 0.86f }
 };
 
 static const KitPreset Pure909 = { "Pure 909",
-    { 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f }
+        { 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f,
+            1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f }
 };
 
 } /* namespace Presets */
@@ -878,6 +1073,11 @@ public:
     Ride        ride;
     Crash       crash;
     RimShot     rimshot;
+    Shaker      shaker;
+    Clave       clave;
+    HiPerc      hiPerc;
+    MidPerc     midPerc;
+    LowPerc     lowPerc;
 
     void Init(float sampleRate) {
         sr_ = sampleRate;
@@ -885,6 +1085,8 @@ public:
         hihatC.Init(sr_);   hihatO.Init(sr_);
         lowTom.Init(sr_);   midTom.Init(sr_);   hiTom.Init(sr_);
         ride.Init(sr_);     crash.Init(sr_);    rimshot.Init(sr_);
+        shaker.Init(sr_);   clave.Init(sr_);
+        hiPerc.Init(sr_);   midPerc.Init(sr_);  lowPerc.Init(sr_);
 
         for (int i = 0; i < INST_COUNT; i++) {
             chanVol_[i]  = 1.0f;
@@ -909,6 +1111,11 @@ public:
             case INST_RIDE:     ride.Trigger(velocity);    break;
             case INST_CRASH:    crash.Trigger(velocity);   break;
             case INST_RIMSHOT:  rimshot.Trigger(velocity); break;
+            case INST_SHAKER:   shaker.Trigger(velocity);  break;
+            case INST_CLAVE:    clave.Trigger(velocity);   break;
+            case INST_HI_PERC:  hiPerc.Trigger(velocity);  break;
+            case INST_MID_PERC: midPerc.Trigger(velocity); break;
+            case INST_LOW_PERC: lowPerc.Trigger(velocity); break;
         }
     }
 
@@ -930,6 +1137,11 @@ public:
         add(INST_RIDE,    ride);
         add(INST_CRASH,   crash);
         add(INST_RIMSHOT, rimshot);
+        add(INST_SHAKER,  shaker);
+        add(INST_CLAVE,   clave);
+        add(INST_HI_PERC, hiPerc);
+        add(INST_MID_PERC, midPerc);
+        add(INST_LOW_PERC, lowPerc);
 
         /* Soft limiter: peak follower con attack instantaneo
          * y release ~0.2s -- evita clipping sin comer transientes */
@@ -975,6 +1187,11 @@ public:
         if (ride.IsActive())    c++;
         if (crash.IsActive())   c++;
         if (rimshot.IsActive()) c++;
+        if (shaker.IsActive())  c++;
+        if (clave.IsActive())   c++;
+        if (hiPerc.IsActive())  c++;
+        if (midPerc.IsActive()) c++;
+        if (lowPerc.IsActive()) c++;
         return c;
     }
 

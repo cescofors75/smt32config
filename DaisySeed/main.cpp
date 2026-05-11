@@ -1454,15 +1454,15 @@ static const uint8_t padTo909[16] = {
     TR909::INST_CRASH,     /* 4 CY */
     TR909::INST_CLAP,      /* 5 CP */
     TR909::INST_RIMSHOT,   /* 6 RS */
-    TR909::INST_RIDE,      /* 7 CB surrogate */
+    TR909::INST_RIDE,      /* 7 CB/RD */
     TR909::INST_LOW_TOM,   /* 8 LT */
     TR909::INST_MID_TOM,   /* 9 MT */
     TR909::INST_HI_TOM,    /* 10 HT */
-    TR909::INST_CLAP,      /* 11 MA surrogate */
-    TR909::INST_RIMSHOT,   /* 12 CL surrogate */
-    TR909::INST_LOW_TOM,   /* 13 HC surrogate */
-    TR909::INST_MID_TOM,   /* 14 MC surrogate */
-    TR909::INST_HI_TOM,    /* 15 LC surrogate */
+    TR909::INST_SHAKER,    /* 11 MA */
+    TR909::INST_CLAVE,     /* 12 CL */
+    TR909::INST_HI_PERC,   /* 13 HC */
+    TR909::INST_MID_PERC,  /* 14 MC */
+    TR909::INST_LOW_PERC,  /* 15 LC */
 };
 
 static const uint8_t padTo505[16] = {
@@ -1477,11 +1477,11 @@ static const uint8_t padTo505[16] = {
     TR505::INST_LOW_TOM,   /* 8 LT */
     TR505::INST_MID_TOM,   /* 9 MT */
     TR505::INST_HI_TOM,    /* 10 HT */
-    TR505::INST_COWBELL,   /* 11 MA surrogate */
-    TR505::INST_CLAP,      /* 12 CL surrogate */
-    TR505::INST_LOW_TOM,   /* 13 HC surrogate */
-    TR505::INST_MID_TOM,   /* 14 MC surrogate */
-    TR505::INST_HI_TOM,    /* 15 LC surrogate */
+    TR505::INST_SHAKER,    /* 11 MA */
+    TR505::INST_CLAVE,     /* 12 CL */
+    TR505::INST_HI_PERC,   /* 13 HC */
+    TR505::INST_MID_PERC,  /* 14 MC */
+    TR505::INST_LOW_PERC,  /* 15 LC */
 };
 
 static const uint8_t padTo303Midi[16] = {
@@ -1501,6 +1501,14 @@ static inline void Synth808TriggerByPad(uint8_t padIdx, float velocity)
 
 /* Bitmask: qué engines están activos */
 static uint16_t synthActiveMask = 0x01FF;  /* all 9 engines active */
+static uint8_t pianoSelectedEngine = SYNTH_ENGINE_303;
+
+static inline bool IsPianoMelodicEngine(uint8_t engine)
+{
+    return engine == SYNTH_ENGINE_303 || engine == SYNTH_ENGINE_WTOSC ||
+           engine == SYNTH_ENGINE_SH101 || engine == SYNTH_ENGINE_FM2OP ||
+           engine == SYNTH_ENGINE_PHYS;
+}
 
 /* ── Demo Mode ── */
 static Demo::DemoSequencer demoSeq;
@@ -1524,6 +1532,7 @@ static constexpr bool kBootDiagMinimal = (RED808_BOOT_DIAG_MINIMAL != 0); /* dia
 static constexpr bool kAudioDiagMinimal = (RED808_AUDIO_DIAG_MINIMAL != 0); /* diagnóstico: solo audio callback + LED */
 static constexpr bool kEnableAudioStart = true; /* iniciar audio normal */
 static constexpr bool kEnableStartLog = true;  /* diagnóstico: ver log boot QSPI/muestras */
+static constexpr bool kEnableSynthCmdLog = true; /* diagnóstico temporal: preset/note routing */
 static constexpr bool kEnableInitFx = (RED808_ENABLE_INIT_FX != 0);    /* diagnóstico: reactivar InitFX para aislar causa */
 #ifndef RED808_STARTUP_TONE_TEST
 #define RED808_STARTUP_TONE_TEST 0
@@ -2342,6 +2351,38 @@ static void ReleaseAllSynthEngines()
     noisePartActive = false;
 }
 
+static void ReleaseSynthEngineState(uint8_t engine)
+{
+    switch(engine)
+    {
+        case SYNTH_ENGINE_808:
+        case SYNTH_ENGINE_909:
+        case SYNTH_ENGINE_505:
+            break;
+        case SYNTH_ENGINE_303:
+            acid303.NoteOff();
+            break;
+        case SYNTH_ENGINE_WTOSC:
+            wtOsc.AllNotesOff();
+            break;
+        case SYNTH_ENGINE_SH101:
+            synthSH101.NoteOff();
+            break;
+        case SYNTH_ENGINE_FM2OP:
+            synthFM2Op.NoteOff();
+            break;
+        case SYNTH_ENGINE_PHYS:
+            physModalActive = false;
+            physStringActive = false;
+            break;
+        case SYNTH_ENGINE_NOISE:
+            noisePartActive = false;
+            break;
+        default:
+            break;
+    }
+}
+
 static void ApplyWtModState()
 {
     wtOsc.SetFilter(wtFilterCutoffState, wtFilterQState);
@@ -2465,6 +2506,37 @@ static void ApplyDrumSynthParam(uint8_t engine, uint8_t instrument, uint8_t para
                     if(paramId==0) synth909.crash.SetDecay(val);
                     if(paramId==3) synth909.crash.volume = clampF(val,0.f,1.f);
                     break;
+                case TR909::INST_RIMSHOT:
+                    if(paramId==3) synth909.rimshot.volume = clampF(val,0.f,1.f);
+                    break;
+                case TR909::INST_SHAKER:
+                    if(paramId==0) synth909.shaker.SetDecay(val);
+                    if(paramId==2) synth909.shaker.SetTone(val);
+                    if(paramId==3) synth909.shaker.volume = clampF(val,0.f,1.f);
+                    break;
+                case TR909::INST_CLAVE:
+                    if(paramId==0) synth909.clave.SetDecay(val);
+                    if(paramId==1) synth909.clave.SetPitch(val);
+                    if(paramId==3) synth909.clave.volume = clampF(val,0.f,1.f);
+                    break;
+                case TR909::INST_HI_PERC:
+                    if(paramId==0) synth909.hiPerc.SetDecay(val);
+                    if(paramId==1) synth909.hiPerc.SetPitch(val);
+                    if(paramId==2) synth909.hiPerc.SetMetal(val);
+                    if(paramId==3) synth909.hiPerc.volume = clampF(val,0.f,1.f);
+                    break;
+                case TR909::INST_MID_PERC:
+                    if(paramId==0) synth909.midPerc.SetDecay(val);
+                    if(paramId==1) synth909.midPerc.SetPitch(val);
+                    if(paramId==2) synth909.midPerc.SetMetal(val);
+                    if(paramId==3) synth909.midPerc.volume = clampF(val,0.f,1.f);
+                    break;
+                case TR909::INST_LOW_PERC:
+                    if(paramId==0) synth909.lowPerc.SetDecay(val);
+                    if(paramId==1) synth909.lowPerc.SetPitch(val);
+                    if(paramId==2) synth909.lowPerc.SetMetal(val);
+                    if(paramId==3) synth909.lowPerc.volume = clampF(val,0.f,1.f);
+                    break;
                 default:
                     if(paramId==3) synth909.SetVolume(instrument, clampF(val,0.f,2.f));
                     break;
@@ -2512,11 +2584,51 @@ static void ApplyDrumSynthParam(uint8_t engine, uint8_t instrument, uint8_t para
                     break;
                 case TR505::INST_COWBELL:
                     if(paramId==0) synth505.cowbell.SetDecay(val);
+                    if(paramId==1) synth505.cowbell.SetTune(val);
                     if(paramId==3) synth505.cowbell.volume = clampF(val,0.f,1.f);
+                    if(paramId==5) synth505.cowbell.SetLoFi(val);
                     break;
                 case TR505::INST_CYMBAL:
                     if(paramId==0) synth505.cymbal.SetDecay(val);
                     if(paramId==3) synth505.cymbal.volume = clampF(val,0.f,1.f);
+                    if(paramId==5) synth505.cymbal.SetLoFi(val);
+                    break;
+                case TR505::INST_RIMSHOT:
+                    if(paramId==3) synth505.rimshot.volume = clampF(val,0.f,1.f);
+                    if(paramId==5) synth505.rimshot.SetLoFi(val);
+                    break;
+                case TR505::INST_SHAKER:
+                    if(paramId==0) synth505.shaker.SetDecay(val);
+                    if(paramId==2) synth505.shaker.SetTone(val);
+                    if(paramId==3) synth505.shaker.volume = clampF(val,0.f,1.f);
+                    if(paramId==5) synth505.shaker.SetLoFi(val);
+                    break;
+                case TR505::INST_CLAVE:
+                    if(paramId==0) synth505.clave.SetDecay(val);
+                    if(paramId==1) synth505.clave.SetPitch(val);
+                    if(paramId==3) synth505.clave.volume = clampF(val,0.f,1.f);
+                    if(paramId==5) synth505.clave.SetLoFi(val);
+                    break;
+                case TR505::INST_HI_PERC:
+                    if(paramId==0) synth505.hiPerc.SetDecay(val);
+                    if(paramId==1) synth505.hiPerc.SetPitch(val);
+                    if(paramId==2) synth505.hiPerc.SetClick(val);
+                    if(paramId==3) synth505.hiPerc.volume = clampF(val,0.f,1.f);
+                    if(paramId==5) synth505.hiPerc.SetLoFi(val);
+                    break;
+                case TR505::INST_MID_PERC:
+                    if(paramId==0) synth505.midPerc.SetDecay(val);
+                    if(paramId==1) synth505.midPerc.SetPitch(val);
+                    if(paramId==2) synth505.midPerc.SetClick(val);
+                    if(paramId==3) synth505.midPerc.volume = clampF(val,0.f,1.f);
+                    if(paramId==5) synth505.midPerc.SetLoFi(val);
+                    break;
+                case TR505::INST_LOW_PERC:
+                    if(paramId==0) synth505.lowPerc.SetDecay(val);
+                    if(paramId==1) synth505.lowPerc.SetPitch(val);
+                    if(paramId==2) synth505.lowPerc.SetClick(val);
+                    if(paramId==3) synth505.lowPerc.volume = clampF(val,0.f,1.f);
+                    if(paramId==5) synth505.lowPerc.SetLoFi(val);
                     break;
                 default:
                     if(paramId==3) synth505.SetVolume(instrument, clampF(val,0.f,2.f));
@@ -2578,28 +2690,28 @@ static void ApplyFm2OpPreset(uint8_t presetId)
     {
         default:
         case 0: /* FM Bass */
-            set(0, 0.001f); set(1, 0.30f); set(2, 0.00f); set(3, 0.12f);
-            set(4, 0.001f); set(5, 0.22f); set(6, 0.00f); set(7, 0.15f);
-            set(8, 1.00f);  set(9, 5.50f); set(10, 0.08f); set(11, 0.0f);
-            set(12, 0.0f);  set(13, 0.40f); set(14, 0.85f);
+            set(0, 0.001f); set(1, 0.26f); set(2, 0.00f); set(3, 0.14f);
+            set(4, 0.001f); set(5, 0.18f); set(6, 0.00f); set(7, 0.12f);
+            set(8, 1.00f);  set(9, 4.20f); set(10, 0.06f); set(11, 0.0f);
+            set(12, 0.0f);  set(13, 0.50f); set(14, 0.92f);
             break;
         case 1: /* EPiano */
-            set(0, 0.001f); set(1, 1.40f); set(2, 0.15f); set(3, 1.10f);
-            set(4, 0.001f); set(5, 0.90f); set(6, 0.00f); set(7, 0.60f);
-            set(8, 2.00f);  set(9, 3.20f); set(10, 0.05f); set(11, 1.0f);
-            set(12, 0.8f);  set(13, 0.75f); set(14, 0.80f);
+            set(0, 0.001f); set(1, 1.10f); set(2, 0.20f); set(3, 0.90f);
+            set(4, 0.001f); set(5, 0.70f); set(6, 0.00f); set(7, 0.48f);
+            set(8, 2.00f);  set(9, 2.80f); set(10, 0.04f); set(11, 1.0f);
+            set(12, 6.0f);  set(13, 0.85f); set(14, 0.88f);
             break;
         case 2: /* Bell */
-            set(0, 0.001f); set(1, 2.60f); set(2, 0.00f); set(3, 1.80f);
-            set(4, 0.001f); set(5, 1.40f); set(6, 0.00f); set(7, 1.00f);
-            set(8, 3.00f);  set(9, 8.50f); set(10, 0.12f); set(11, 0.0f);
-            set(12, 1.5f);  set(13, 0.85f); set(14, 0.75f);
+            set(0, 0.001f); set(1, 2.20f); set(2, 0.00f); set(3, 1.40f);
+            set(4, 0.001f); set(5, 1.10f); set(6, 0.00f); set(7, 0.80f);
+            set(8, 3.00f);  set(9, 7.20f); set(10, 0.10f); set(11, 0.0f);
+            set(12, 14.0f); set(13, 0.90f); set(14, 0.84f);
             break;
         case 3: /* Growl Lead */
-            set(0, 0.005f); set(1, 0.50f); set(2, 0.35f); set(3, 0.25f);
-            set(4, 0.001f); set(5, 0.40f); set(6, 0.20f); set(7, 0.30f);
-            set(8, 1.50f);  set(9, 10.50f); set(10, 0.50f); set(11, 2.0f);
-            set(12, 7.0f);  set(13, 0.60f); set(14, 0.82f);
+            set(0, 0.004f); set(1, 0.44f); set(2, 0.28f); set(3, 0.22f);
+            set(4, 0.001f); set(5, 0.34f); set(6, 0.12f); set(7, 0.22f);
+            set(8, 1.50f);  set(9, 9.20f); set(10, 0.34f); set(11, 2.0f);
+            set(12, -10.0f); set(13, 0.72f); set(14, 0.90f);
             break;
     }
 }
@@ -2609,10 +2721,12 @@ static void ApplyPhysPreset(uint8_t presetId)
     auto set = [](uint8_t paramId, float value) {
         switch(paramId)
         {
+            case 0: physModal.SetFreq(clampF(value, 20.f, 10000.f));    break;
             case 1: physModal.SetStructure(clampF(value, 0.f, 1.f));   break;
             case 2: physModal.SetBrightness(clampF(value, 0.f, 1.f));  break;
             case 3: physModal.SetDamping(clampF(value, 0.f, 1.f));     break;
             case 4: physModalGain = clampF(value, 0.f, 1.f);           break;
+            case 5: physString.SetFreq(clampF(value, 20.f, 10000.f));   break;
             case 6: physString.SetStructure(clampF(value, 0.f, 1.f));  break;
             case 7: physString.SetBrightness(clampF(value, 0.f, 1.f)); break;
             case 8: physString.SetDamping(clampF(value, 0.f, 1.f));    break;
@@ -2624,20 +2738,20 @@ static void ApplyPhysPreset(uint8_t presetId)
     {
         default:
         case 0: /* Clasica */
-            set(1, 0.10f); set(2, 0.22f); set(3, 0.84f); set(4, 0.10f);
-            set(6, 0.30f); set(7, 0.42f); set(8, 0.72f); set(9, 0.92f);
+            set(0, 196.0f); set(1, 0.12f); set(2, 0.28f); set(3, 0.78f); set(4, 0.18f);
+            set(5, 196.0f); set(6, 0.34f); set(7, 0.48f); set(8, 0.68f); set(9, 0.98f);
             break;
         case 1: /* Flamenco */
-            set(1, 0.16f); set(2, 0.54f); set(3, 0.62f); set(4, 0.11f);
-            set(6, 0.26f); set(7, 0.70f); set(8, 0.46f); set(9, 0.96f);
+            set(0, 220.0f); set(1, 0.20f); set(2, 0.60f); set(3, 0.56f); set(4, 0.16f);
+            set(5, 220.0f); set(6, 0.28f); set(7, 0.76f); set(8, 0.42f); set(9, 1.00f);
             break;
         case 2: /* Funky */
-            set(1, 0.28f); set(2, 0.66f); set(3, 0.48f); set(4, 0.08f);
-            set(6, 0.56f); set(7, 0.86f); set(8, 0.26f); set(9, 0.82f);
+            set(0, 164.81f); set(1, 0.34f); set(2, 0.74f); set(3, 0.42f); set(4, 0.12f);
+            set(5, 164.81f); set(6, 0.62f); set(7, 0.88f); set(8, 0.22f); set(9, 0.90f);
             break;
         case 3: /* Electrica */
-            set(1, 0.32f); set(2, 0.82f); set(3, 0.34f); set(4, 0.14f);
-            set(6, 0.52f); set(7, 0.96f); set(8, 0.18f); set(9, 0.88f);
+            set(0, 146.83f); set(1, 0.26f); set(2, 0.86f); set(3, 0.30f); set(4, 0.24f);
+            set(5, 146.83f); set(6, 0.56f); set(7, 0.98f); set(8, 0.16f); set(9, 0.96f);
             break;
     }
 }
@@ -2749,6 +2863,11 @@ static void ApplySynthPreset(uint8_t engine, uint8_t presetId)
                     set(TR909::INST_HI_TOM, 0, 0.30f); set(TR909::INST_HI_TOM, 1, 180.0f); set(TR909::INST_HI_TOM, 3, 0.80f);
                     set(TR909::INST_RIDE, 0, 0.50f); set(TR909::INST_RIDE, 3, 0.80f);
                     set(TR909::INST_CRASH, 0, 0.80f); set(TR909::INST_CRASH, 3, 0.80f);
+                    set(TR909::INST_SHAKER, 0, 0.085f); set(TR909::INST_SHAKER, 2, 0.65f); set(TR909::INST_SHAKER, 3, 0.72f);
+                    set(TR909::INST_CLAVE, 0, 0.055f); set(TR909::INST_CLAVE, 1, 1750.0f); set(TR909::INST_CLAVE, 3, 0.76f);
+                    set(TR909::INST_HI_PERC, 0, 0.085f); set(TR909::INST_HI_PERC, 1, 820.0f); set(TR909::INST_HI_PERC, 2, 0.28f); set(TR909::INST_HI_PERC, 3, 0.70f);
+                    set(TR909::INST_MID_PERC, 0, 0.120f); set(TR909::INST_MID_PERC, 1, 520.0f); set(TR909::INST_MID_PERC, 2, 0.20f); set(TR909::INST_MID_PERC, 3, 0.72f);
+                    set(TR909::INST_LOW_PERC, 0, 0.170f); set(TR909::INST_LOW_PERC, 1, 310.0f); set(TR909::INST_LOW_PERC, 2, 0.14f); set(TR909::INST_LOW_PERC, 3, 0.74f);
                     break;
                 case 1:
                     synth909.LoadPreset(TR909::Presets::Techno);
@@ -2762,6 +2881,11 @@ static void ApplySynthPreset(uint8_t engine, uint8_t presetId)
                     set(TR909::INST_HI_TOM, 0, 0.20f); set(TR909::INST_HI_TOM, 1, 170.0f); set(TR909::INST_HI_TOM, 3, 0.60f);
                     set(TR909::INST_RIDE, 0, 0.85f); set(TR909::INST_RIDE, 3, 0.74f);
                     set(TR909::INST_CRASH, 0, 0.50f); set(TR909::INST_CRASH, 3, 0.56f);
+                    set(TR909::INST_SHAKER, 0, 0.060f); set(TR909::INST_SHAKER, 2, 0.88f); set(TR909::INST_SHAKER, 3, 0.86f);
+                    set(TR909::INST_CLAVE, 0, 0.035f); set(TR909::INST_CLAVE, 1, 2150.0f); set(TR909::INST_CLAVE, 3, 0.78f);
+                    set(TR909::INST_HI_PERC, 0, 0.060f); set(TR909::INST_HI_PERC, 1, 980.0f); set(TR909::INST_HI_PERC, 2, 0.38f); set(TR909::INST_HI_PERC, 3, 0.64f);
+                    set(TR909::INST_MID_PERC, 0, 0.095f); set(TR909::INST_MID_PERC, 1, 610.0f); set(TR909::INST_MID_PERC, 2, 0.28f); set(TR909::INST_MID_PERC, 3, 0.66f);
+                    set(TR909::INST_LOW_PERC, 0, 0.130f); set(TR909::INST_LOW_PERC, 1, 360.0f); set(TR909::INST_LOW_PERC, 2, 0.20f); set(TR909::INST_LOW_PERC, 3, 0.68f);
                     break;
                 case 2:
                     synth909.LoadPreset(TR909::Presets::HousePound);
@@ -2775,6 +2899,11 @@ static void ApplySynthPreset(uint8_t engine, uint8_t presetId)
                     set(TR909::INST_HI_TOM, 0, 0.32f); set(TR909::INST_HI_TOM, 1, 176.0f); set(TR909::INST_HI_TOM, 3, 0.68f);
                     set(TR909::INST_RIDE, 0, 0.95f); set(TR909::INST_RIDE, 3, 0.86f);
                     set(TR909::INST_CRASH, 0, 0.58f); set(TR909::INST_CRASH, 3, 0.62f);
+                    set(TR909::INST_SHAKER, 0, 0.105f); set(TR909::INST_SHAKER, 2, 0.52f); set(TR909::INST_SHAKER, 3, 0.58f);
+                    set(TR909::INST_CLAVE, 0, 0.060f); set(TR909::INST_CLAVE, 1, 1650.0f); set(TR909::INST_CLAVE, 3, 0.62f);
+                    set(TR909::INST_HI_PERC, 0, 0.095f); set(TR909::INST_HI_PERC, 1, 740.0f); set(TR909::INST_HI_PERC, 2, 0.20f); set(TR909::INST_HI_PERC, 3, 0.58f);
+                    set(TR909::INST_MID_PERC, 0, 0.135f); set(TR909::INST_MID_PERC, 1, 480.0f); set(TR909::INST_MID_PERC, 2, 0.16f); set(TR909::INST_MID_PERC, 3, 0.60f);
+                    set(TR909::INST_LOW_PERC, 0, 0.190f); set(TR909::INST_LOW_PERC, 1, 290.0f); set(TR909::INST_LOW_PERC, 2, 0.12f); set(TR909::INST_LOW_PERC, 3, 0.62f);
                     break;
                 case 3:
                     synth909.LoadPreset(TR909::Presets::Industrial);
@@ -2788,6 +2917,11 @@ static void ApplySynthPreset(uint8_t engine, uint8_t presetId)
                     set(TR909::INST_HI_TOM, 0, 0.36f); set(TR909::INST_HI_TOM, 1, 196.0f); set(TR909::INST_HI_TOM, 3, 0.76f);
                     set(TR909::INST_RIDE, 0, 1.40f); set(TR909::INST_RIDE, 3, 0.66f);
                     set(TR909::INST_CRASH, 0, 1.80f); set(TR909::INST_CRASH, 3, 0.82f);
+                    set(TR909::INST_SHAKER, 0, 0.045f); set(TR909::INST_SHAKER, 2, 1.00f); set(TR909::INST_SHAKER, 3, 0.98f);
+                    set(TR909::INST_CLAVE, 0, 0.030f); set(TR909::INST_CLAVE, 1, 2450.0f); set(TR909::INST_CLAVE, 3, 0.92f);
+                    set(TR909::INST_HI_PERC, 0, 0.050f); set(TR909::INST_HI_PERC, 1, 1120.0f); set(TR909::INST_HI_PERC, 2, 0.60f); set(TR909::INST_HI_PERC, 3, 0.84f);
+                    set(TR909::INST_MID_PERC, 0, 0.080f); set(TR909::INST_MID_PERC, 1, 690.0f); set(TR909::INST_MID_PERC, 2, 0.44f); set(TR909::INST_MID_PERC, 3, 0.86f);
+                    set(TR909::INST_LOW_PERC, 0, 0.110f); set(TR909::INST_LOW_PERC, 1, 410.0f); set(TR909::INST_LOW_PERC, 2, 0.32f); set(TR909::INST_LOW_PERC, 3, 0.88f);
                     break;
                 case 4: /* Pure 909 — fiel al hardware original (kick beater click claro, sin saturacion) */
                     synth909.LoadPreset(TR909::Presets::Pure909);
@@ -2801,6 +2935,11 @@ static void ApplySynthPreset(uint8_t engine, uint8_t presetId)
                     set(TR909::INST_HI_TOM,  0, 0.30f); set(TR909::INST_HI_TOM,  1, 180.0f); set(TR909::INST_HI_TOM,  3, 0.80f);
                     set(TR909::INST_RIDE,    0, 0.55f); set(TR909::INST_RIDE,    3, 0.78f);
                     set(TR909::INST_CRASH,   0, 0.85f); set(TR909::INST_CRASH,   3, 0.75f);
+                    set(TR909::INST_SHAKER,  0, 0.085f); set(TR909::INST_SHAKER,  2, 0.62f); set(TR909::INST_SHAKER,  3, 0.72f);
+                    set(TR909::INST_CLAVE,   0, 0.055f); set(TR909::INST_CLAVE,   1, 1750.0f); set(TR909::INST_CLAVE,   3, 0.74f);
+                    set(TR909::INST_HI_PERC, 0, 0.085f); set(TR909::INST_HI_PERC, 1, 820.0f); set(TR909::INST_HI_PERC, 2, 0.24f); set(TR909::INST_HI_PERC, 3, 0.70f);
+                    set(TR909::INST_MID_PERC,0, 0.120f); set(TR909::INST_MID_PERC,1, 520.0f); set(TR909::INST_MID_PERC,2, 0.18f); set(TR909::INST_MID_PERC,3, 0.72f);
+                    set(TR909::INST_LOW_PERC,0, 0.170f); set(TR909::INST_LOW_PERC,1, 310.0f); set(TR909::INST_LOW_PERC,2, 0.12f); set(TR909::INST_LOW_PERC,3, 0.74f);
                     break;
             }
             break;
@@ -2825,6 +2964,11 @@ static void ApplySynthPreset(uint8_t engine, uint8_t presetId)
                     set(TR505::INST_HI_TOM, 0, 0.30f); set(TR505::INST_HI_TOM, 1, 180.0f); set(TR505::INST_HI_TOM, 3, 0.80f);
                     set(TR505::INST_COWBELL, 0, 0.10f); set(TR505::INST_COWBELL, 3, 0.80f);
                     set(TR505::INST_CYMBAL, 0, 0.80f); set(TR505::INST_CYMBAL, 3, 0.80f);
+                    set(TR505::INST_SHAKER, 0, 0.095f); set(TR505::INST_SHAKER, 2, 0.55f); set(TR505::INST_SHAKER, 3, 0.76f); set(TR505::INST_SHAKER, 5, 0.35f);
+                    set(TR505::INST_CLAVE, 0, 0.050f); set(TR505::INST_CLAVE, 1, 1650.0f); set(TR505::INST_CLAVE, 3, 0.76f); set(TR505::INST_CLAVE, 5, 0.30f);
+                    set(TR505::INST_HI_PERC, 0, 0.075f); set(TR505::INST_HI_PERC, 1, 760.0f); set(TR505::INST_HI_PERC, 2, 0.34f); set(TR505::INST_HI_PERC, 3, 0.70f); set(TR505::INST_HI_PERC, 5, 0.34f);
+                    set(TR505::INST_MID_PERC, 0, 0.115f); set(TR505::INST_MID_PERC, 1, 480.0f); set(TR505::INST_MID_PERC, 2, 0.26f); set(TR505::INST_MID_PERC, 3, 0.72f); set(TR505::INST_MID_PERC, 5, 0.34f);
+                    set(TR505::INST_LOW_PERC, 0, 0.160f); set(TR505::INST_LOW_PERC, 1, 300.0f); set(TR505::INST_LOW_PERC, 2, 0.18f); set(TR505::INST_LOW_PERC, 3, 0.74f); set(TR505::INST_LOW_PERC, 5, 0.34f);
                     break;
                 case 1:
                     synth505.LoadPreset(TR505::Presets::NewWave);
@@ -2835,6 +2979,11 @@ static void ApplySynthPreset(uint8_t engine, uint8_t presetId)
                     set(TR505::INST_HIHAT_O, 0, 0.24f); set(TR505::INST_HIHAT_O, 3, 0.82f);
                     set(TR505::INST_COWBELL, 0, 0.14f); set(TR505::INST_COWBELL, 3, 0.98f);
                     set(TR505::INST_CYMBAL, 0, 0.42f); set(TR505::INST_CYMBAL, 3, 0.62f);
+                    set(TR505::INST_SHAKER, 0, 0.070f); set(TR505::INST_SHAKER, 2, 0.78f); set(TR505::INST_SHAKER, 3, 0.92f); set(TR505::INST_SHAKER, 5, 0.28f);
+                    set(TR505::INST_CLAVE, 0, 0.042f); set(TR505::INST_CLAVE, 1, 1900.0f); set(TR505::INST_CLAVE, 3, 0.84f); set(TR505::INST_CLAVE, 5, 0.24f);
+                    set(TR505::INST_HI_PERC, 0, 0.065f); set(TR505::INST_HI_PERC, 1, 860.0f); set(TR505::INST_HI_PERC, 2, 0.42f); set(TR505::INST_HI_PERC, 3, 0.76f); set(TR505::INST_HI_PERC, 5, 0.28f);
+                    set(TR505::INST_MID_PERC, 0, 0.100f); set(TR505::INST_MID_PERC, 1, 540.0f); set(TR505::INST_MID_PERC, 2, 0.32f); set(TR505::INST_MID_PERC, 3, 0.78f); set(TR505::INST_MID_PERC, 5, 0.28f);
+                    set(TR505::INST_LOW_PERC, 0, 0.140f); set(TR505::INST_LOW_PERC, 1, 340.0f); set(TR505::INST_LOW_PERC, 2, 0.22f); set(TR505::INST_LOW_PERC, 3, 0.80f); set(TR505::INST_LOW_PERC, 5, 0.28f);
                     break;
                 case 2:
                     synth505.LoadPreset(TR505::Presets::Electro);
@@ -2846,6 +2995,11 @@ static void ApplySynthPreset(uint8_t engine, uint8_t presetId)
                     set(TR505::INST_LOW_TOM, 0, 0.24f); set(TR505::INST_LOW_TOM, 1, 92.0f); set(TR505::INST_LOW_TOM, 3, 0.72f);
                     set(TR505::INST_MID_TOM, 0, 0.24f); set(TR505::INST_MID_TOM, 1, 136.0f); set(TR505::INST_MID_TOM, 3, 0.72f);
                     set(TR505::INST_HI_TOM, 0, 0.22f); set(TR505::INST_HI_TOM, 1, 196.0f); set(TR505::INST_HI_TOM, 3, 0.72f);
+                    set(TR505::INST_SHAKER, 0, 0.055f); set(TR505::INST_SHAKER, 2, 0.86f); set(TR505::INST_SHAKER, 3, 0.78f); set(TR505::INST_SHAKER, 5, 0.18f);
+                    set(TR505::INST_CLAVE, 0, 0.034f); set(TR505::INST_CLAVE, 1, 2150.0f); set(TR505::INST_CLAVE, 3, 0.76f); set(TR505::INST_CLAVE, 5, 0.16f);
+                    set(TR505::INST_HI_PERC, 0, 0.052f); set(TR505::INST_HI_PERC, 1, 960.0f); set(TR505::INST_HI_PERC, 2, 0.50f); set(TR505::INST_HI_PERC, 3, 0.72f); set(TR505::INST_HI_PERC, 5, 0.18f);
+                    set(TR505::INST_MID_PERC, 0, 0.082f); set(TR505::INST_MID_PERC, 1, 610.0f); set(TR505::INST_MID_PERC, 2, 0.38f); set(TR505::INST_MID_PERC, 3, 0.74f); set(TR505::INST_MID_PERC, 5, 0.18f);
+                    set(TR505::INST_LOW_PERC, 0, 0.112f); set(TR505::INST_LOW_PERC, 1, 390.0f); set(TR505::INST_LOW_PERC, 2, 0.28f); set(TR505::INST_LOW_PERC, 3, 0.76f); set(TR505::INST_LOW_PERC, 5, 0.18f);
                     break;
                 case 3:
                     synth505.LoadPreset(TR505::Presets::LoFiHipHop);
@@ -2859,6 +3013,11 @@ static void ApplySynthPreset(uint8_t engine, uint8_t presetId)
                     set(TR505::INST_HI_TOM, 0, 0.30f); set(TR505::INST_HI_TOM, 1, 168.0f); set(TR505::INST_HI_TOM, 3, 0.74f);
                     set(TR505::INST_COWBELL, 0, 0.08f); set(TR505::INST_COWBELL, 3, 0.44f);
                     set(TR505::INST_CYMBAL, 0, 1.10f); set(TR505::INST_CYMBAL, 3, 0.50f);
+                    set(TR505::INST_SHAKER, 0, 0.130f); set(TR505::INST_SHAKER, 2, 0.38f); set(TR505::INST_SHAKER, 3, 0.70f); set(TR505::INST_SHAKER, 5, 0.72f);
+                    set(TR505::INST_CLAVE, 0, 0.070f); set(TR505::INST_CLAVE, 1, 1450.0f); set(TR505::INST_CLAVE, 3, 0.66f); set(TR505::INST_CLAVE, 5, 0.68f);
+                    set(TR505::INST_HI_PERC, 0, 0.110f); set(TR505::INST_HI_PERC, 1, 660.0f); set(TR505::INST_HI_PERC, 2, 0.26f); set(TR505::INST_HI_PERC, 3, 0.66f); set(TR505::INST_HI_PERC, 5, 0.70f);
+                    set(TR505::INST_MID_PERC, 0, 0.155f); set(TR505::INST_MID_PERC, 1, 420.0f); set(TR505::INST_MID_PERC, 2, 0.20f); set(TR505::INST_MID_PERC, 3, 0.68f); set(TR505::INST_MID_PERC, 5, 0.70f);
+                    set(TR505::INST_LOW_PERC, 0, 0.220f); set(TR505::INST_LOW_PERC, 1, 250.0f); set(TR505::INST_LOW_PERC, 2, 0.14f); set(TR505::INST_LOW_PERC, 3, 0.70f); set(TR505::INST_LOW_PERC, 5, 0.70f);
                     break;
                 case 4: /* Pure 505 — fiel al original (sample-based digital limpio, sin lofi) */
                     synth505.LoadPreset(TR505::Presets::Pure505);
@@ -2872,6 +3031,11 @@ static void ApplySynthPreset(uint8_t engine, uint8_t presetId)
                     set(TR505::INST_HI_TOM,  0, 0.30f); set(TR505::INST_HI_TOM,  1, 180.0f); set(TR505::INST_HI_TOM,  3, 0.80f);
                     set(TR505::INST_COWBELL, 0, 0.10f); set(TR505::INST_COWBELL, 3, 0.78f);
                     set(TR505::INST_CYMBAL,  0, 0.80f); set(TR505::INST_CYMBAL,  3, 0.74f);
+                    set(TR505::INST_SHAKER,  0, 0.095f); set(TR505::INST_SHAKER,  2, 0.55f); set(TR505::INST_SHAKER,  3, 0.76f); set(TR505::INST_SHAKER,  5, 0.0f);
+                    set(TR505::INST_CLAVE,   0, 0.050f); set(TR505::INST_CLAVE,   1, 1650.0f); set(TR505::INST_CLAVE,   3, 0.76f); set(TR505::INST_CLAVE,   5, 0.0f);
+                    set(TR505::INST_HI_PERC, 0, 0.075f); set(TR505::INST_HI_PERC, 1, 760.0f); set(TR505::INST_HI_PERC, 2, 0.30f); set(TR505::INST_HI_PERC, 3, 0.70f); set(TR505::INST_HI_PERC, 5, 0.0f);
+                    set(TR505::INST_MID_PERC,0, 0.115f); set(TR505::INST_MID_PERC,1, 480.0f); set(TR505::INST_MID_PERC,2, 0.22f); set(TR505::INST_MID_PERC,3, 0.72f); set(TR505::INST_MID_PERC,5, 0.0f);
+                    set(TR505::INST_LOW_PERC,0, 0.160f); set(TR505::INST_LOW_PERC,1, 300.0f); set(TR505::INST_LOW_PERC,2, 0.16f); set(TR505::INST_LOW_PERC,3, 0.74f); set(TR505::INST_LOW_PERC,5, 0.0f);
                     break;
             }
             break;
@@ -2955,47 +3119,47 @@ static void ApplySynthPreset(uint8_t engine, uint8_t presetId)
             {
                 default:
                 case 0: /* Classic Pad */
-                    wtOsc.SetWavePos(1.2f);
-                    wtOsc.SetAttack(30.0f);
-                    wtOsc.SetDecay(900.0f);
-                    wtOsc.volume = 0.75f;
-                    wtFilterCutoffState = 6500.0f;
+                    wtOsc.SetWavePos(1.0f);
+                    wtOsc.SetAttack(24.0f);
+                    wtOsc.SetDecay(1100.0f);
+                    wtOsc.volume = 0.84f;
+                    wtFilterCutoffState = 7600.0f;
                     wtFilterQState      = 0.70f;
-                    wtLfoRateState      = 0.20f;
-                    wtLfoDepthState     = 0.15f;
-                    wtLfoTargetState    = WT_LFO_VOL;
+                    wtLfoRateState      = 0.12f;
+                    wtLfoDepthState     = 0.06f;
+                    wtLfoTargetState    = WT_LFO_WAVE;
                     break;
                 case 1: /* Glass Pluck */
-                    wtOsc.SetWavePos(2.7f);
+                    wtOsc.SetWavePos(2.4f);
                     wtOsc.SetAttack(0.0f);
-                    wtOsc.SetDecay(260.0f);
-                    wtOsc.volume = 0.82f;
-                    wtFilterCutoffState = 4200.0f;
-                    wtFilterQState      = 1.10f;
-                    wtLfoRateState      = 5.20f;
-                    wtLfoDepthState     = 0.08f;
-                    wtLfoTargetState    = WT_LFO_PITCH;
+                    wtOsc.SetDecay(220.0f);
+                    wtOsc.volume = 0.92f;
+                    wtFilterCutoffState = 7200.0f;
+                    wtFilterQState      = 0.90f;
+                    wtLfoRateState      = 2.20f;
+                    wtLfoDepthState     = 0.04f;
+                    wtLfoTargetState    = WT_LFO_WAVE;
                     break;
                 case 2: /* Organ Motion */
-                    wtOsc.SetWavePos(6.0f);
-                    wtOsc.SetAttack(8.0f);
-                    wtOsc.SetDecay(1200.0f);
-                    wtOsc.volume = 0.78f;
-                    wtFilterCutoffState = 9000.0f;
-                    wtFilterQState      = 0.80f;
-                    wtLfoRateState      = 0.90f;
-                    wtLfoDepthState     = 0.30f;
+                    wtOsc.SetWavePos(5.8f);
+                    wtOsc.SetAttack(6.0f);
+                    wtOsc.SetDecay(1800.0f);
+                    wtOsc.volume = 0.88f;
+                    wtFilterCutoffState = 9800.0f;
+                    wtFilterQState      = 0.65f;
+                    wtLfoRateState      = 0.35f;
+                    wtLfoDepthState     = 0.10f;
                     wtLfoTargetState    = WT_LFO_VOL;
                     break;
                 case 3: /* PWM Bass */
-                    wtOsc.SetWavePos(4.0f);
+                    wtOsc.SetWavePos(3.6f);
                     wtOsc.SetAttack(0.0f);
-                    wtOsc.SetDecay(320.0f);
-                    wtOsc.volume = 0.85f;
-                    wtFilterCutoffState = 2400.0f;
-                    wtFilterQState      = 1.40f;
-                    wtLfoRateState      = 3.50f;
-                    wtLfoDepthState     = 0.12f;
+                    wtOsc.SetDecay(360.0f);
+                    wtOsc.volume = 0.96f;
+                    wtFilterCutoffState = 3600.0f;
+                    wtFilterQState      = 1.10f;
+                    wtLfoRateState      = 1.10f;
+                    wtLfoDepthState     = 0.05f;
                     wtLfoTargetState    = WT_LFO_WAVE;
                     break;
             }
@@ -5680,29 +5844,17 @@ static void ProcessCommand()
             float velocity = p[2] / 127.0f;
             switch(engine){
                 case SYNTH_ENGINE_808: {
-                    uint8_t inst = instrument;
-                    if(inst >= TR808::INST_COUNT && inst < 16)
-                        inst = padTo808[inst];
-                    else if(inst >= TR808::INST_COUNT)
-                        inst = (uint8_t)(inst % TR808::INST_COUNT);
+                    uint8_t inst = (instrument < 16) ? padTo808[instrument] : (uint8_t)(instrument % TR808::INST_COUNT);
                     synth808.Trigger(inst, velocity);
                     break;
                 }
                 case SYNTH_ENGINE_909: {
-                    uint8_t inst = instrument;
-                    if(inst >= TR909::INST_COUNT && inst < 16)
-                        inst = padTo909[inst];
-                    else if(inst >= TR909::INST_COUNT)
-                        inst = (uint8_t)(inst % TR909::INST_COUNT);
+                    uint8_t inst = (instrument < 16) ? padTo909[instrument] : (uint8_t)(instrument % TR909::INST_COUNT);
                     synth909.Trigger(inst, velocity);
                     break;
                 }
                 case SYNTH_ENGINE_505: {
-                    uint8_t inst = instrument;
-                    if(inst >= TR505::INST_COUNT && inst < 16)
-                        inst = padTo505[inst];
-                    else if(inst >= TR505::INST_COUNT)
-                        inst = (uint8_t)(inst % TR505::INST_COUNT);
+                    uint8_t inst = (instrument < 16) ? padTo505[instrument] : (uint8_t)(instrument % TR505::INST_COUNT);
                     synth505.Trigger(inst, velocity);
                     break;
                 }
@@ -5872,6 +6024,8 @@ static void ProcessCommand()
             uint8_t engine = p[0];
             uint8_t track  = p[1];
             uint8_t note   = (len >= 3) ? p[2] : 0xFF;
+            if(kEnableSynthCmdLog && track == 0xFF)
+                hw.PrintLine("SYNTH_NOTE_OFF_ALL engine=%u", engine);
             switch(engine){
                 case SYNTH_ENGINE_303:   acid303.NoteOff(); break;
                 case SYNTH_ENGINE_WTOSC:
@@ -5951,7 +6105,27 @@ static void ProcessCommand()
 
     case CMD_SYNTH_PRESET:
         if(len >= 2)
-            ApplySynthPreset(p[0], p[1]);
+        {
+            uint8_t engine = p[0];
+            uint8_t preset = p[1];
+            if(engine < SYNTH_ENGINE_COUNT)
+            {
+                if(IsPianoMelodicEngine(engine))
+                {
+                    ReleaseAllSynthEngines();
+                    pianoSelectedEngine = engine;
+                    if(kEnableSynthCmdLog)
+                        hw.PrintLine("SYNTH_PRESET piano engine=%u preset=%u mask=%u", engine, preset, synthActiveMask);
+                }
+                else
+                {
+                    ReleaseSynthEngineState(engine);
+                    if(kEnableSynthCmdLog)
+                        hw.PrintLine("SYNTH_PRESET engine=%u preset=%u mask=%u", engine, preset, synthActiveMask);
+                }
+                ApplySynthPreset(engine, preset);
+            }
+        }
         break;
 
     /* ──────── CMD_SYNTH_NOTE_ON_EX (0xC7) ────────
@@ -5967,6 +6141,13 @@ static void ProcessCommand()
             bool    accent   = (p[3] != 0);
             bool    slide    = (p[4] != 0);
             float   vel01    = velocity / 127.0f;
+            if(IsPianoMelodicEngine(engine) && engine != pianoSelectedEngine)
+            {
+                ReleaseAllSynthEngines();
+                pianoSelectedEngine = engine;
+                if(kEnableSynthCmdLog)
+                    hw.PrintLine("PIANO_SELECT via=note_on engine=%u", engine);
+            }
             switch(engine){
                 case SYNTH_ENGINE_303:
                     acid303.NoteOn(midiNote, accent, slide);

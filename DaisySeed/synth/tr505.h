@@ -5,9 +5,10 @@
  *  Sonido PCM de 8 bits y ~8 kHz de sample rate interno --
  *  thin, bright, aliased, lo-fi. New wave, synth-pop, electro.
  *
- *  INSTRUMENTOS (11):
+ *  INSTRUMENTOS (16):
  *    Kick  Snare  Clap  HiHatClosed  HiHatOpen
  *    LowTom  MidTom  HiTom  Cowbell  Cymbal  RimShot
+ *    Shaker  Clave  HiPerc  MidPerc  LowPerc
  *
  *  IDENTIDAD SONORA PRESERVADA:
  *    El caracter lo-fi NO es un defecto -- es el sonido.
@@ -886,6 +887,223 @@ private:
 };
 
 /* =====================================================================
+ *  SHAKER / MARACAS 505
+ * ---------------------------------------------------------------------
+ *  Noise PCM corto y granulado para el slot MA, con bit-crush integrado.
+ * ===================================================================== */
+class Shaker {
+public:
+    float decay  = 0.095f;
+    float tone   = 0.55f;
+    float lofi   = 0.45f;
+    float volume = 1.0f;
+
+    void Init(float sampleRate) {
+        sr_ = sampleRate;
+        dt_ = 1.0f / sr_;
+        active_ = false;
+        hpF_.SetCoefs(sr_, 4400.0f + tone * 3600.0f, 0.75f);
+        bpF_.SetCoefs(sr_, 1800.0f + tone * 2200.0f, 1.2f);
+        rng_.Seed(0x5055A01u);
+        UpdateLoFi();
+    }
+
+    void Trigger(float velocity = 1.0f) {
+        active_ = true;
+        time_ = 0.0f;
+        vel_ = VelCurve(velocity);
+        hpF_.SetCoefs(sr_, 4400.0f + tone * 3600.0f, 0.75f);
+        bpF_.SetCoefs(sr_, 1800.0f + tone * 2200.0f, 1.2f);
+        hpF_.Reset();
+        bpF_.Reset();
+        lofiProc_.Reset();
+        rng_.Seed(0x5055A01u ^ (uint32_t)(vel_ * 23451));
+    }
+
+    float Process() {
+        if (!active_) return 0.0f;
+        float n = rng_.White();
+        float env = expf(-time_ / decay);
+        float atk = 1.0f - expf(-time_ / 0.0012f);
+        float out = (hpF_.ProcessHP(n) * 0.9f + bpF_.ProcessBP(n) * 0.35f) * env * atk;
+        out = FastTanh(out * 2.1f);
+        out = lofiProc_.Process(out);
+        time_ += dt_;
+        if (env < 0.0005f) active_ = false;
+        return out * volume * vel_;
+    }
+
+    bool IsActive() const { return active_; }
+    void SetDecay(float d) { decay = Clamp(d, 0.02f, 0.45f); }
+    void SetTone(float t)  { tone = Clamp(t, 0.0f, 1.0f); }
+    void SetLoFi(float l)  { lofi = Clamp(l, 0.0f, 1.0f); UpdateLoFi(); }
+
+private:
+    float sr_ = 48000.0f, dt_ = 1.0f / 48000.0f;
+    bool  active_ = false;
+    float time_ = 0.0f, vel_ = 1.0f;
+    SVF   hpF_, bpF_;
+    Rng   rng_;
+    LoFiProcessor lofiProc_;
+
+    void UpdateLoFi() {
+        lofiProc_.bitDepth      = 11.0f - lofi * 6.0f;
+        lofiProc_.sampleRateDiv = 2.0f  + lofi * 4.5f;
+        lofiProc_.UpdateCache();
+    }
+};
+
+/* =====================================================================
+ *  CLAVE 505
+ * ---------------------------------------------------------------------
+ *  Click tonal PCM, mas fino y plastico que el rimshot.
+ * ===================================================================== */
+class Clave {
+public:
+    float decay  = 0.050f;
+    float pitch  = 1650.0f;
+    float lofi   = 0.35f;
+    float volume = 1.0f;
+
+    void Init(float sampleRate) {
+        sr_ = sampleRate;
+        dt_ = 1.0f / sr_;
+        active_ = false;
+        resonF_.SetCoefs(sr_, pitch, 7.0f);
+        clickF_.SetCoefs(sr_, 3600.0f, 1.0f);
+        rng_.Seed(0x505C1A5u);
+        UpdateLoFi();
+    }
+
+    void Trigger(float velocity = 1.0f) {
+        active_ = true;
+        time_ = 0.0f;
+        vel_ = VelCurve(velocity);
+        impulse_ = 1.0f;
+        resonF_.SetCoefs(sr_, pitch, 7.0f);
+        resonF_.Reset();
+        clickF_.Reset();
+        lofiProc_.Reset();
+        rng_.Seed(0x505C1A5u ^ (uint32_t)(vel_ * 15551));
+    }
+
+    float Process() {
+        if (!active_) return 0.0f;
+        float toneEnv = expf(-time_ / decay);
+        float tone = resonF_.ProcessBP(impulse_) * toneEnv;
+        impulse_ = 0.0f;
+        float clickEnv = expf(-time_ / 0.0009f);
+        float click = clickF_.ProcessBP(rng_.White()) * clickEnv * 0.35f;
+        float out = FastTanh((tone + click) * 2.0f);
+        out = lofiProc_.Process(out);
+        time_ += dt_;
+        if (toneEnv < 0.0005f && clickEnv < 0.0005f) active_ = false;
+        return out * volume * vel_;
+    }
+
+    bool IsActive() const { return active_; }
+    void SetDecay(float d) { decay = Clamp(d, 0.015f, 0.25f); }
+    void SetPitch(float p) { pitch = Clamp(p, 800.0f, 2800.0f); }
+    void SetLoFi(float l)  { lofi = Clamp(l, 0.0f, 1.0f); UpdateLoFi(); }
+
+private:
+    float sr_ = 48000.0f, dt_ = 1.0f / 48000.0f;
+    bool  active_ = false;
+    float time_ = 0.0f, vel_ = 1.0f, impulse_ = 0.0f;
+    SVF   resonF_, clickF_;
+    Rng   rng_;
+    LoFiProcessor lofiProc_;
+
+    void UpdateLoFi() {
+        lofiProc_.bitDepth      = 12.0f - lofi * 7.0f;
+        lofiProc_.sampleRateDiv = 1.5f  + lofi * 3.5f;
+        lofiProc_.UpdateCache();
+    }
+};
+
+/* =====================================================================
+ *  PERC 505 BASE
+ * ---------------------------------------------------------------------
+ *  Tres percusiones PCM-like para HC/MC/LC: mas cortas y plasticas que
+ *  los toms, con ataque granular y bit-crush propio.
+ * ===================================================================== */
+class Perc505Base {
+public:
+    float decay  = 0.12f;
+    float pitch  = 480.0f;
+    float click  = 0.22f;
+    float lofi   = 0.38f;
+    float volume = 1.0f;
+
+    void Init(float sampleRate) {
+        sr_ = sampleRate;
+        dt_ = 1.0f / sr_;
+        active_ = false;
+        bodyF_.SetCoefs(sr_, pitch, 4.0f);
+        clickF_.SetCoefs(sr_, pitch * 5.0f, 1.1f);
+        rng_.Seed(0x5059E01u);
+        UpdateLoFi();
+    }
+
+    void Trigger(float velocity = 1.0f) {
+        active_ = true;
+        time_ = 0.0f;
+        vel_ = VelCurve(velocity);
+        impulse_ = 1.0f;
+        bodyF_.SetCoefs(sr_, pitch, 4.0f);
+        clickF_.SetCoefs(sr_, pitch * 5.0f, 1.1f);
+        bodyF_.Reset();
+        clickF_.Reset();
+        lofiProc_.Reset();
+        rng_.Seed(0x5059E01u ^ (uint32_t)(vel_ * pitch));
+    }
+
+    float Process() {
+        if (!active_) return 0.0f;
+        float env = expf(-time_ / decay);
+        float body = bodyF_.ProcessBP(impulse_) * env;
+        impulse_ = 0.0f;
+        float clickEnv = expf(-time_ / 0.0025f);
+        float clickOut = clickF_.ProcessBP(rng_.White()) * clickEnv * click;
+        float out = FastTanh((body + clickOut) * 1.8f);
+        out = lofiProc_.Process(out);
+        time_ += dt_;
+        if (env < 0.0005f && clickEnv < 0.0005f) active_ = false;
+        return out * volume * vel_;
+    }
+
+    bool IsActive() const { return active_; }
+    void SetDecay(float d) { decay = Clamp(d, 0.035f, 0.5f); }
+    void SetPitch(float p) { pitch = Clamp(p, 120.0f, 1400.0f); }
+    void SetClick(float c) { click = Clamp(c, 0.0f, 1.0f); }
+    void SetLoFi(float l)  { lofi = Clamp(l, 0.0f, 1.0f); UpdateLoFi(); }
+
+protected:
+    float sr_ = 48000.0f, dt_ = 1.0f / 48000.0f;
+    bool  active_ = false;
+    float time_ = 0.0f, vel_ = 1.0f, impulse_ = 0.0f;
+    SVF   bodyF_, clickF_;
+    Rng   rng_;
+    LoFiProcessor lofiProc_;
+
+    void UpdateLoFi() {
+        lofiProc_.bitDepth      = 12.0f - lofi * 7.0f;
+        lofiProc_.sampleRateDiv = 1.5f  + lofi * 4.5f;
+        lofiProc_.UpdateCache();
+    }
+};
+
+class HiPerc : public Perc505Base {
+public: HiPerc() { pitch = 760.0f; decay = 0.075f; click = 0.34f; lofi = 0.42f; }
+};
+class MidPerc : public Perc505Base {
+public: MidPerc() { pitch = 480.0f; decay = 0.115f; click = 0.26f; lofi = 0.40f; }
+};
+class LowPerc : public Perc505Base {
+public: LowPerc() { pitch = 300.0f; decay = 0.160f; click = 0.18f; lofi = 0.38f; }
+};
+
+/* =====================================================================
  *  INSTRUMENT IDs
  * ===================================================================== */
 enum InstrumentId : uint8_t {
@@ -900,6 +1118,11 @@ enum InstrumentId : uint8_t {
     INST_COWBELL,
     INST_CYMBAL,
     INST_RIMSHOT,
+    INST_SHAKER,
+    INST_CLAVE,
+    INST_HI_PERC,
+    INST_MID_PERC,
+    INST_LOW_PERC,
     INST_COUNT
 };
 
@@ -916,31 +1139,36 @@ namespace Presets {
 
 /* Classic 505: como salio de fabrica, lofi moderado */
 static const KitPreset Classic505 = { "Classic 505",
-    { 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f },
+        { 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f,
+            1.0f, 1.0f, 1.0f, 0.92f, 0.92f, 0.88f, 0.90f, 0.92f },
     0.3f
 };
 
 /* New Wave: hihat y cowbell arriba, kick moderado */
 static const KitPreset NewWave = { "New Wave",
-    { 0.8f, 0.9f, 0.7f, 0.9f, 0.8f, 0.6f, 0.6f, 0.7f, 1.1f, 0.6f, 0.7f },
+        { 0.8f, 0.9f, 0.7f, 0.9f, 0.8f, 0.6f, 0.6f, 0.7f,
+            1.1f, 0.6f, 0.7f, 1.00f, 0.80f, 0.65f, 0.68f, 0.72f },
     0.25f
 };
 
 /* Electro: kick fuerte, snare bright, poco lofi */
 static const KitPreset Electro = { "Electro",
-    { 1.2f, 1.0f, 0.6f, 0.8f, 0.7f, 0.7f, 0.7f, 0.7f, 0.5f, 0.5f, 0.6f },
+        { 1.2f, 1.0f, 0.6f, 0.8f, 0.7f, 0.7f, 0.7f, 0.7f,
+            0.5f, 0.5f, 0.6f, 0.75f, 0.72f, 0.70f, 0.72f, 0.74f },
     0.15f
 };
 
 /* Lo-Fi Hip-Hop: todo crushed y degradado */
 static const KitPreset LoFiHipHop = { "Lo-Fi Hip-Hop",
-    { 1.0f, 0.9f, 0.7f, 0.6f, 0.6f, 0.8f, 0.8f, 0.7f, 0.4f, 0.5f, 0.5f },
+        { 1.0f, 0.9f, 0.7f, 0.6f, 0.6f, 0.8f, 0.8f, 0.7f,
+            0.4f, 0.5f, 0.5f, 0.85f, 0.80f, 0.72f, 0.74f, 0.76f },
     0.65f
 };
 
 /* Pure 505: sin lofi, fiel al original digital limpio */
 static const KitPreset Pure505 = { "Pure 505",
-    { 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f },
+        { 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f,
+            1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f },
     0.0f
 };
 
@@ -967,6 +1195,11 @@ public:
     Cowbell     cowbell;
     Cymbal      cymbal;
     RimShot     rimshot;
+    Shaker      shaker;
+    Clave       clave;
+    HiPerc      hiPerc;
+    MidPerc     midPerc;
+    LowPerc     lowPerc;
 
     void Init(float sampleRate) {
         sr_ = sampleRate;
@@ -974,6 +1207,8 @@ public:
         hihatC.Init(sr_);   hihatO.Init(sr_);
         lowTom.Init(sr_);   midTom.Init(sr_);   hiTom.Init(sr_);
         cowbell.Init(sr_);  cymbal.Init(sr_);   rimshot.Init(sr_);
+        shaker.Init(sr_);   clave.Init(sr_);
+        hiPerc.Init(sr_);   midPerc.Init(sr_);  lowPerc.Init(sr_);
 
         for (int i = 0; i < INST_COUNT; i++) {
             chanVol_[i]  = 1.0f;
@@ -998,6 +1233,11 @@ public:
             case INST_COWBELL:  cowbell.Trigger(velocity); break;
             case INST_CYMBAL:   cymbal.Trigger(velocity);  break;
             case INST_RIMSHOT:  rimshot.Trigger(velocity); break;
+            case INST_SHAKER:   shaker.Trigger(velocity);  break;
+            case INST_CLAVE:    clave.Trigger(velocity);   break;
+            case INST_HI_PERC:  hiPerc.Trigger(velocity);  break;
+            case INST_MID_PERC: midPerc.Trigger(velocity); break;
+            case INST_LOW_PERC: lowPerc.Trigger(velocity); break;
         }
     }
 
@@ -1019,6 +1259,11 @@ public:
         add(INST_COWBELL, cowbell);
         add(INST_CYMBAL,  cymbal);
         add(INST_RIMSHOT, rimshot);
+        add(INST_SHAKER,  shaker);
+        add(INST_CLAVE,   clave);
+        add(INST_HI_PERC, hiPerc);
+        add(INST_MID_PERC, midPerc);
+        add(INST_LOW_PERC, lowPerc);
 
         /* Soft limiter */
         mix *= masterVol_;
@@ -1038,6 +1283,8 @@ public:
         hihatC.SetLoFi(l);    hihatO.SetLoFi(l);
         lowTom.SetLoFi(l);    midTom.SetLoFi(l);    hiTom.SetLoFi(l);
         cowbell.SetLoFi(l);   cymbal.SetLoFi(l);    rimshot.SetLoFi(l);
+        shaker.SetLoFi(l);    clave.SetLoFi(l);
+        hiPerc.SetLoFi(l);    midPerc.SetLoFi(l);   lowPerc.SetLoFi(l);
     }
 
     /* -- Mixer -- */
@@ -1074,6 +1321,11 @@ public:
         if (cowbell.IsActive()) c++;
         if (cymbal.IsActive())  c++;
         if (rimshot.IsActive()) c++;
+        if (shaker.IsActive())  c++;
+        if (clave.IsActive())   c++;
+        if (hiPerc.IsActive())  c++;
+        if (midPerc.IsActive()) c++;
+        if (lowPerc.IsActive()) c++;
         return c;
     }
 
