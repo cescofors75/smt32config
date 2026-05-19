@@ -109,8 +109,8 @@ def read_wav_mono16(filepath):
             avg = sum(channel_vals) // ch
             samples.append(max(-32768, min(32767, avg)))
 
-    # Limit to ~2s at 48kHz (MAX_SAMPLE_BYTES/2 = 96000)
-    MAX_SAMPLES = 96000
+    # Limit to 8 MB per sampler once converted to mono int16.
+    MAX_SAMPLES = (8 * 1024 * 1024) // 2
     if len(samples) > MAX_SAMPLES:
         samples = samples[:MAX_SAMPLES]
 

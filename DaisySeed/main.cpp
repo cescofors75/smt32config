@@ -35,6 +35,14 @@
 #define RED808_ENABLE_UART_LEGACY 0
 #endif
 
+#ifndef RED808_DSP_BLOCK_PROFILE
+#define RED808_DSP_BLOCK_PROFILE 0
+#endif
+
+#ifndef RED808_MEM_AUDIT
+#define RED808_MEM_AUDIT 0
+#endif
+
 /* ═══════════════════════════════════════════════════════════════════
  *  FAST MATH — sinf/expf overrides for synth engine hot paths
  *  sinf: corrected parabolic, max error ~0.06% — inaudible in drums
@@ -65,7 +73,6 @@ static inline float __fast_expf(float x) {
 #include "synth/wavetable_osc.h"
 #include "synth/sh101.h"     /* I1: Roland SH-101 monosynth */
 #include "synth/fm2op.h"     /* I2: 2-operator FM Yamaha-style */
-#include "synth/demo_mode.h"
 
 #undef sinf
 #undef expf
@@ -82,6 +89,118 @@ UartHandler uart_slave;
 #endif
 static CpuLoadMeter audioLoadMeter;
 
+#if RED808_DSP_BLOCK_PROFILE
+enum DspProfBlock : uint8_t {
+    DSP_PROF_CALLBACK = 0,
+    DSP_PROF_SEQ,
+    DSP_PROF_LFO,
+    DSP_PROF_SAMPLER_VOICES,
+    DSP_PROF_SYNTH_808,
+    DSP_PROF_SYNTH_909,
+    DSP_PROF_SYNTH_505,
+    DSP_PROF_SYNTH_303,
+    DSP_PROF_SYNTH_WT,
+    DSP_PROF_SYNTH_SH101,
+    DSP_PROF_SYNTH_FM2OP,
+    DSP_PROF_SYNTH_PHYS,
+    DSP_PROF_SYNTH_NOISE,
+    DSP_PROF_SYNTH_ROUTING,
+    DSP_PROF_MASTER_FX,
+    DSP_PROF_OUTPUT,
+    DSP_PROF_COUNT
+};
+
+struct DspProfAccum {
+    volatile uint64_t cycles;
+    volatile uint32_t calls;
+    volatile uint32_t maxCycles;
+};
+
+static DspProfAccum dspProf[DSP_PROF_COUNT];
+static volatile uint32_t dspProfBlocks = 0;
+static constexpr float kCpuClockHz = 480000000.0f;
+static constexpr float kDspProfBlockBudgetCycles = kCpuClockHz * (128.0f / 48000.0f);
+
+static inline void DspProfInit()
+{
+    CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
+    DWT->CYCCNT = 0;
+    DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
+}
+
+static inline uint32_t DspProfNow()
+{
+    return DWT->CYCCNT;
+}
+
+static inline void DspProfAdd(DspProfBlock block, uint32_t cycles)
+{
+    DspProfAccum& a = dspProf[block];
+    a.cycles += cycles;
+    a.calls++;
+    if(cycles > a.maxCycles)
+        a.maxCycles = cycles;
+}
+
+static inline void DspProfBlockDone()
+{
+    dspProfBlocks++;
+}
+
+struct DspProfSnapshot {
+    uint64_t cycles;
+    uint32_t calls;
+    uint32_t maxCycles;
+};
+
+static void DspProfSnapshotAndReset(DspProfSnapshot out[DSP_PROF_COUNT], uint32_t* blocks)
+{
+    __disable_irq();
+    for(uint8_t i = 0; i < DSP_PROF_COUNT; i++){
+        out[i].cycles = dspProf[i].cycles;
+        out[i].calls = dspProf[i].calls;
+        out[i].maxCycles = dspProf[i].maxCycles;
+        dspProf[i].cycles = 0;
+        dspProf[i].calls = 0;
+        dspProf[i].maxCycles = 0;
+    }
+    *blocks = dspProfBlocks;
+    dspProfBlocks = 0;
+    __enable_irq();
+}
+
+static const char* DspProfName(uint8_t block)
+{
+    switch(block){
+        case DSP_PROF_CALLBACK: return "callback";
+        case DSP_PROF_SEQ: return "sequencer";
+        case DSP_PROF_LFO: return "track_lfo";
+        case DSP_PROF_SAMPLER_VOICES: return "sampler_voices";
+        case DSP_PROF_SYNTH_808: return "tr808";
+        case DSP_PROF_SYNTH_909: return "tr909";
+        case DSP_PROF_SYNTH_505: return "tr505";
+        case DSP_PROF_SYNTH_303: return "tb303";
+        case DSP_PROF_SYNTH_WT: return "wavetable";
+        case DSP_PROF_SYNTH_SH101: return "sh101";
+        case DSP_PROF_SYNTH_FM2OP: return "fm2op";
+        case DSP_PROF_SYNTH_PHYS: return "phys";
+        case DSP_PROF_SYNTH_NOISE: return "noise";
+        case DSP_PROF_SYNTH_ROUTING: return "synth_routing";
+        case DSP_PROF_MASTER_FX: return "master_fx";
+        case DSP_PROF_OUTPUT: return "output";
+        default: return "unknown";
+    }
+}
+
+#define DSP_PROF_SCOPE(name) uint32_t _dsp_prof_start_##name = DspProfNow()
+#define DSP_PROF_END(name) DspProfAdd(DSP_PROF_##name, DspProfNow() - _dsp_prof_start_##name)
+#else
+static inline void DspProfInit() {}
+static inline void DspProfBlockDone() {}
+#define DSP_PROF_SCOPE(name) do{}while(0)
+#define DSP_PROF_END(name) do{}while(0)
+#endif
+
 /* ═══════════════════════════════════════════════════════════════════
  *  2. CONFIGURACIÓN
  * ═══════════════════════════════════════════════════════════════════ */
@@ -91,8 +210,11 @@ static CpuLoadMeter audioLoadMeter;
 #define DAISY_UART_BAUD    230400
 #endif
 #define MAX_PADS           24
+#define CLEAN_TRACK_COUNT  4
+#define TOTAL_SAMPLE_SLOTS (MAX_PADS + CLEAN_TRACK_COUNT)
 #define MAX_VOICES         32
-#define MAX_SAMPLE_BYTES   (2 * 1024 * 1024)   /* 2 MB per pad = ~22 s @ 48000 */
+#define MAX_SAMPLE_BYTES   (8 * 1024 * 1024)   /* 8 MB per sampler */
+#define SAMPLE_POOL_BYTES  (48 * 1024 * 1024)  /* global SDRAM pool for all samplers */
 #define MAX_DELAY_SAMPLES  96000         /* 2 s @ 48000             */
 #define TRACK_ECHO_SIZE    9600          /* 200 ms per track        */
 
@@ -455,13 +577,140 @@ struct __attribute__((packed)) SdLoadSamplePayload {
 /* ═══════════════════════════════════════════════════════════════════
  *  6. SAMPLES EN SDRAM  (64 MB)
  * ═══════════════════════════════════════════════════════════════════ */
-DSY_SDRAM_BSS static int16_t sampleStorage[MAX_PADS][MAX_SAMPLE_BYTES / 2];
+DSY_SDRAM_BSS static int16_t sampleStorage[SAMPLE_POOL_BYTES / 2];
 
 static uint32_t sampleLength[MAX_PADS];
 static uint32_t sampleTotalSamples[MAX_PADS];
+static uint32_t sampleOffsetSamples[MAX_PADS];
+static uint32_t sampleCapacitySamples[MAX_PADS];
 static bool     sampleLoaded[MAX_PADS];
 static volatile bool padLoading[MAX_PADS];  /* true while LoadWavToPad is writing */
+static uint32_t cleanTrackLength[CLEAN_TRACK_COUNT];
+static uint32_t cleanTrackTotalSamples[CLEAN_TRACK_COUNT];
+static uint32_t cleanTrackOffsetSamples[CLEAN_TRACK_COUNT];
+static uint32_t cleanTrackCapacitySamples[CLEAN_TRACK_COUNT];
+static bool     cleanTrackLoaded[CLEAN_TRACK_COUNT];
+static bool     cleanTrackMuted[CLEAN_TRACK_COUNT];
+static bool     cleanTrackEnabled[CLEAN_TRACK_COUNT];
+static bool     cleanTrackActive[CLEAN_TRACK_COUNT];
+static volatile bool cleanTrackLoading[CLEAN_TRACK_COUNT];
+static uint32_t cleanTrackPlayhead[CLEAN_TRACK_COUNT];
 static volatile bool kitMuteActive = false; /* true → AudioCallback outputs silence */
+
+static inline int16_t* SamplePtr(uint8_t pad)
+{
+    if(pad >= MAX_PADS || sampleCapacitySamples[pad] == 0)
+        return nullptr;
+    return &sampleStorage[sampleOffsetSamples[pad]];
+}
+
+static inline int16_t* CleanTrackPtr(uint8_t track)
+{
+    if(track >= CLEAN_TRACK_COUNT || cleanTrackCapacitySamples[track] == 0)
+        return nullptr;
+    return &sampleStorage[cleanTrackOffsetSamples[track]];
+}
+
+static void FreeSampleStorage(uint8_t pad)
+{
+    if(pad >= MAX_PADS)
+        return;
+    sampleOffsetSamples[pad] = 0;
+    sampleCapacitySamples[pad] = 0;
+}
+
+static void FreeCleanTrackStorage(uint8_t track)
+{
+    if(track >= CLEAN_TRACK_COUNT)
+        return;
+    cleanTrackOffsetSamples[track] = 0;
+    cleanTrackCapacitySamples[track] = 0;
+}
+
+static bool AllocAnySampleStorage(uint8_t slot, uint32_t neededSamples)
+{
+    if(neededSamples == 0 || neededSamples > (MAX_SAMPLE_BYTES / 2))
+        return false;
+
+    const bool isClean = slot >= MAX_PADS;
+    const uint8_t index = isClean ? (uint8_t)(slot - MAX_PADS) : slot;
+    if((isClean && index >= CLEAN_TRACK_COUNT) || (!isClean && index >= MAX_PADS))
+        return false;
+
+    uint32_t* capacity = isClean ? cleanTrackCapacitySamples : sampleCapacitySamples;
+    uint32_t* offset = isClean ? cleanTrackOffsetSamples : sampleOffsetSamples;
+    if(capacity[index] >= neededSamples)
+        return true;
+
+    if(isClean) FreeCleanTrackStorage(index);
+    else FreeSampleStorage(index);
+
+    struct Segment {
+        uint32_t start;
+        uint32_t end;
+    };
+
+    Segment segments[TOTAL_SAMPLE_SLOTS];
+    uint8_t segCount = 0;
+    for(uint8_t i = 0; i < MAX_PADS; i++){
+        if(!isClean && i == index) continue;
+        if(sampleCapacitySamples[i] == 0) continue;
+        segments[segCount].start = sampleOffsetSamples[i];
+        segments[segCount].end   = sampleOffsetSamples[i] + sampleCapacitySamples[i];
+        segCount++;
+    }
+    for(uint8_t i = 0; i < CLEAN_TRACK_COUNT; i++){
+        if(isClean && i == index) continue;
+        if(cleanTrackCapacitySamples[i] == 0) continue;
+        segments[segCount].start = cleanTrackOffsetSamples[i];
+        segments[segCount].end   = cleanTrackOffsetSamples[i] + cleanTrackCapacitySamples[i];
+        segCount++;
+    }
+
+    for(uint8_t i = 1; i < segCount; i++){
+        Segment key = segments[i];
+        int8_t j = (int8_t)i - 1;
+        while(j >= 0 && segments[j].start > key.start){
+            segments[j + 1] = segments[j];
+            j--;
+        }
+        segments[j + 1] = key;
+    }
+
+    uint32_t cursor = 0;
+    for(uint8_t i = 0; i < segCount; i++){
+        if(segments[i].start >= cursor && (segments[i].start - cursor) >= neededSamples){
+            offset[index] = cursor;
+            capacity[index] = neededSamples;
+            return true;
+        }
+        if(segments[i].end > cursor)
+            cursor = segments[i].end;
+    }
+
+    const uint32_t poolSamples = SAMPLE_POOL_BYTES / 2;
+    if(cursor <= poolSamples && (poolSamples - cursor) >= neededSamples){
+        offset[index] = cursor;
+        capacity[index] = neededSamples;
+        return true;
+    }
+
+    return false;
+}
+
+static bool AllocSampleStorage(uint8_t pad, uint32_t neededSamples)
+{
+    if(pad >= MAX_PADS)
+        return false;
+    return AllocAnySampleStorage(pad, neededSamples);
+}
+
+static bool AllocCleanTrackStorage(uint8_t track, uint32_t neededSamples)
+{
+    if(track >= CLEAN_TRACK_COUNT)
+        return false;
+    return AllocAnySampleStorage((uint8_t)(MAX_PADS + track), neededSamples);
+}
 
 /* ═══════════════════════════════════════════════════════════════════
  *  7. VOCES POLIFÓNICAS
@@ -619,6 +868,12 @@ static void DsqInit() {
     memset(pendingTriggers, 0, sizeof(pendingTriggers)); /* E4 */
     /* -1 (0xFF) = todos los tracks en modo sampler por defecto */
     memset(dsqTrackEngine, (uint8_t)0xFF, sizeof(dsqTrackEngine));
+    for(int i = 0; i < CLEAN_TRACK_COUNT; i++) {
+        cleanTrackEnabled[i] = true;
+        cleanTrackActive[i] = false;
+        cleanTrackMuted[i] = false;
+        cleanTrackPlayhead[i] = 0;
+    }
     dseq.tempo        = 120.0f;
     dseq.patternLength = 16;
     dseq.currentStep  = -1;
@@ -1510,8 +1765,6 @@ static inline bool IsPianoMelodicEngine(uint8_t engine)
            engine == SYNTH_ENGINE_PHYS;
 }
 
-/* ── Demo Mode ── */
-static Demo::DemoSequencer demoSeq;
 #ifndef RED808_ENABLE_SPI_SLAVE
 #define RED808_ENABLE_SPI_SLAVE 1
 #endif
@@ -1520,7 +1773,7 @@ static Demo::DemoSequencer demoSeq;
 #endif
 static constexpr bool kEnableSpiSlave = (RED808_ENABLE_SPI_SLAVE != 0);  /* modo integrado: comunicación con ESP32 master */
 static constexpr bool kUseSpiTransport = true;  /* Daisy usa SPI1 slave; UART legacy queda fuera por macro */
-static constexpr bool kEnableSynth505 = true;  /* habilitado para demo completa de arranque */
+static constexpr bool kEnableSynth505 = true;
 static constexpr bool kAudioSafeMode = false; /* callback de audio real */
 #ifndef RED808_BOOT_DIAG_MINIMAL
 #define RED808_BOOT_DIAG_MINIMAL 0
@@ -1558,7 +1811,6 @@ static constexpr bool kAcceptOneBasedPadIndex = false; /* ESP32 envía 0-based (
 static constexpr bool kTriggerSynthOnLiveCmd = false; /* producción: no superponer synth al disparo de sampler */
 static constexpr bool kForceMasterGainDebug = false; /* producción: respetar master volume del host */
 static constexpr bool kSpiSingleFrame10 = true; /* compat: master envía trigger en 1 frame de 10 bytes */
-static bool demoModeActive = false; /* demo desactivada — audio codec y jack ya verificados */
 static bool perfStressMode = false;
 static uint8_t perfStressProfile = 0;
 static uint32_t perfStressNextMs = 0;
@@ -3403,11 +3655,53 @@ static void PrintStartupStressReport(uint32_t elapsedMs, const char* phase)
                  (unsigned)CountLoadedPads());
 }
 
+#if RED808_DSP_BLOCK_PROFILE
+static void PrintDspProfileReport(uint32_t elapsedMs, const char* phase)
+{
+    if(!kEnableStartLog)
+        return;
+
+    DspProfSnapshot snap[DSP_PROF_COUNT];
+    uint32_t blocks = 0;
+    DspProfSnapshotAndReset(snap, &blocks);
+    if(blocks == 0)
+        return;
+
+    const float totalBudget = kDspProfBlockBudgetCycles * (float)blocks;
+    for(uint8_t i = 0; i < DSP_PROF_COUNT; i++){
+        if(snap[i].calls == 0)
+            continue;
+        float pct = totalBudget > 0.0f ? ((float)snap[i].cycles * 100.0f / totalBudget) : 0.0f;
+        float avgCycles = (float)snap[i].cycles / (float)snap[i].calls;
+        uint32_t pct10 = (uint32_t)(pct * 10.0f + 0.5f);
+        uint32_t avg = (uint32_t)(avgCycles + 0.5f);
+        uint32_t peak = snap[i].maxCycles;
+        hw.PrintLine("DSP_PROFILE ms=%lu phase=%s block=%s pct=%lu.%lu avg_cycles=%lu peak_cycles=%lu calls=%lu audio_blocks=%lu",
+                     (unsigned long)elapsedMs,
+                     phase,
+                     DspProfName(i),
+                     (unsigned long)(pct10 / 10u),
+                     (unsigned long)(pct10 % 10u),
+                     (unsigned long)avg,
+                     (unsigned long)peak,
+                     (unsigned long)snap[i].calls,
+                     (unsigned long)blocks);
+    }
+}
+#else
+static inline void PrintDspProfileReport(uint32_t, const char*) {}
+#endif
+
 static void BeginStartupStressReport(uint32_t nowMs)
 {
     if(!kStartupStressReport || startupStressReportDone)
         return;
     audioLoadMeter.Reset();
+#if RED808_DSP_BLOCK_PROFILE
+    DspProfSnapshot discard[DSP_PROF_COUNT];
+    uint32_t discardBlocks = 0;
+    DspProfSnapshotAndReset(discard, &discardBlocks);
+#endif
     masterPeak = 0.0f;
     spiErrCnt = 0;
     spiRingDrops = 0;
@@ -3484,6 +3778,7 @@ static void RunStartupStressReport(uint32_t nowMs)
     if(startupStressLastReportMs == 0 || (nowMs - startupStressLastReportMs) >= 1000u){
         startupStressLastReportMs = nowMs;
         PrintStartupStressReport(elapsed, StartupStressPhaseName(phase));
+        PrintDspProfileReport(elapsed, StartupStressPhaseName(phase));
     }
 }
 
@@ -3666,6 +3961,7 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
                    size_t                    size)
 {
     audioLoadMeter.OnBlockStart();
+    DSP_PROF_SCOPE(CALLBACK);
 
     /* Enforce FZ+DN in ISR context (belt-and-suspenders for FPDSCR) */
     __asm volatile("VMRS r0, FPSCR\n"
@@ -3686,6 +3982,8 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
                 if(tonePhase > 2.0f * 3.14159265f) tonePhase -= 2.0f * 3.14159265f;
                 toneSamples++;
             }
+            DSP_PROF_END(CALLBACK);
+            DspProfBlockDone();
             audioLoadMeter.OnBlockEnd();
             return;
         }
@@ -3694,12 +3992,16 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
     for(size_t i = 0; i < size; i++) out[0][i] = out[1][i] = 0.0f;
 
     if(kAudioSafeMode){
+        DSP_PROF_END(CALLBACK);
+        DspProfBlockDone();
         audioLoadMeter.OnBlockEnd();
         return;
     }
 
     /* ── Kit loading: output silence to avoid SDRAM bus contention / data races ── */
     if(kitMuteActive){
+        DSP_PROF_END(CALLBACK);
+        DspProfBlockDone();
         audioLoadMeter.OnBlockEnd();
         return;
     }
@@ -3744,6 +4046,7 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
         /* ── Daisy Sequencer tick (sample-accurate BPM clock) ─────────────
          *  samplesElapsed==0 → new step boundary: advance and fire.
          *  Called BEFORE voice rendering so new voices are active this sample. */
+        DSP_PROF_SCOPE(SEQ);
         if(dseq.playing){
             if(dseq.samplesElapsed == 0){
                 dseq.currentStep = (dseq.currentStep + 1) % (int16_t)dseq.patternLength;
@@ -3770,6 +4073,7 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
             if(dseq.samplesElapsed >= thr)
                 dseq.samplesElapsed = 0;
         }
+        DSP_PROF_END(SEQ);
 
         float busL = 0, busR = 0;
         float reverbBusL = 0, reverbBusR = 0;
@@ -3777,6 +4081,7 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
         float chorusBusL = 0, chorusBusR = 0;
         float sideSrc = 0;
 
+        DSP_PROF_SCOPE(LFO);
         if(anyTrackLfo){
             for(int t = 0; t < MAX_PADS; t++){
                 lfoVal[t] = 0.0f;
@@ -3801,8 +4106,30 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
                 lfoVal[t] = v * trkLfoDepth[t];
             }
         }
+        DSP_PROF_END(LFO);
+
+        for(uint8_t ct = 0; ct < CLEAN_TRACK_COUNT; ct++){
+            if(!cleanTrackActive[ct] || cleanTrackMuted[ct] || !cleanTrackLoaded[ct])
+                continue;
+            int16_t* cleanData = CleanTrackPtr(ct);
+            if(cleanData == nullptr || cleanTrackLength[ct] == 0){
+                cleanTrackActive[ct] = false;
+                continue;
+            }
+            uint32_t pos = cleanTrackPlayhead[ct];
+            if(pos >= cleanTrackLength[ct]){
+                cleanTrackActive[ct] = false;
+                cleanTrackPlayhead[ct] = 0;
+                continue;
+            }
+            float sample = cleanData[pos] / 32768.0f;
+            cleanTrackPlayhead[ct] = pos + 1;
+            busL += sample;
+            busR += sample;
+        }
 
         /* ── Render voices ── */
+        DSP_PROF_SCOPE(SAMPLER_VOICES);
         for(int v = 0; v < MAX_VOICES; v++){
             Voice& vx = voices[v];
             if(!vx.active) continue;
@@ -3829,11 +4156,14 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
             idx = (uint32_t)fabsf(vx.pos);
             if(idx >= sampleLength[p]){ vx.active = false; continue; }
 
+            int16_t* sampleData = SamplePtr(p);
+            if(sampleData == nullptr){ vx.active = false; continue; }
+
             /* Interpolation */
             float frac = fabsf(vx.pos) - idx;
-            float s0   = sampleStorage[p][idx] / 32768.0f;
+            float s0   = sampleData[idx] / 32768.0f;
             float s1   = (idx + 1 < sampleLength[p])
-                         ? sampleStorage[p][idx + 1] / 32768.0f : 0.0f;
+                         ? sampleData[idx + 1] / 32768.0f : 0.0f;
             float s    = s0 + frac * (s1 - s0);
 
             /* ── Steal fade-out (5 ms exponential) ── */
@@ -4019,17 +4349,13 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
             float pk = fmaxf(fabsf(outL), fabsf(outR));
             if(pk > trackPeak[p]) trackPeak[p] = pk;
         }
+        DSP_PROF_END(SAMPLER_VOICES);
 
         /* ── Sidechain envelope ── */
         if(scActive){
             if(sideSrc > scEnv) scEnv += (sideSrc - scEnv) * scAttackK;
             else                scEnv -= (scEnv - sideSrc) * scReleaseK;
         }
-
-        /* ── DEMO MODE: tick del secuenciador ── */
-        float demoFadeGain = 1.0f;
-        if (demoModeActive)
-            demoFadeGain = demoSeq.ProcessSample();
 
         /* ── SYNTH ENGINES — process + cadena FX per-track ── */
         /* Lambda: aplica filtro/dist/EQ/echo/flanger/comp/vol/pan del track t  */
@@ -4119,47 +4445,81 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
             if(pk > trackPeak[t]) trackPeak[t] = pk;
         };
 
-        /* demoFadeGain ya calculado arriba por el bloque DEMO MODE */
         if ((synthActiveMask & (1 << SYNTH_ENGINE_808)) && synth808.ActiveCount() > 0){
-            float s = sanitizeF(synth808.Process()) * demoFadeGain;
+            DSP_PROF_SCOPE(SYNTH_808);
+            float s = sanitizeF(synth808.Process());
+            DSP_PROF_END(SYNTH_808);
+            DSP_PROF_SCOPE(SYNTH_ROUTING);
             synthTobus(s, engTrk[SYNTH_ENGINE_808]);
+            DSP_PROF_END(SYNTH_ROUTING);
         }
         if ((synthActiveMask & (1 << SYNTH_ENGINE_909)) && synth909.ActiveCount() > 0){
-            float s = sanitizeF(synth909.Process()) * demoFadeGain;
+            DSP_PROF_SCOPE(SYNTH_909);
+            float s = sanitizeF(synth909.Process());
+            DSP_PROF_END(SYNTH_909);
+            DSP_PROF_SCOPE(SYNTH_ROUTING);
             synthTobus(s, engTrk[SYNTH_ENGINE_909]);
+            DSP_PROF_END(SYNTH_ROUTING);
         }
         if (kEnableSynth505 && (synthActiveMask & (1 << SYNTH_ENGINE_505)) && synth505.ActiveCount() > 0){
-            float s = sanitizeF(synth505.Process()) * demoFadeGain;
+            DSP_PROF_SCOPE(SYNTH_505);
+            float s = sanitizeF(synth505.Process());
+            DSP_PROF_END(SYNTH_505);
+            DSP_PROF_SCOPE(SYNTH_ROUTING);
             synthTobus(s, engTrk[SYNTH_ENGINE_505]);
+            DSP_PROF_END(SYNTH_ROUTING);
         }
         if ((synthActiveMask & (1 << SYNTH_ENGINE_303)) && acid303.IsActive()){
             /* v2.5: −4dB headroom en synths melódicos para no saturar el bus */
-            float s = sanitizeF(acid303.Process()) * demoFadeGain * 0.63f;
+            DSP_PROF_SCOPE(SYNTH_303);
+            float s = sanitizeF(acid303.Process()) * 0.63f;
+            DSP_PROF_END(SYNTH_303);
+            DSP_PROF_SCOPE(SYNTH_ROUTING);
             synthTobus(s, engTrk[SYNTH_ENGINE_303]);
+            DSP_PROF_END(SYNTH_ROUTING);
         }
         if ((synthActiveMask & (1 << SYNTH_ENGINE_WTOSC)) && wtOsc.IsActive()){
-            float s = sanitizeF(wtOsc.Process()) * demoFadeGain * 0.63f;
+            DSP_PROF_SCOPE(SYNTH_WT);
+            float s = sanitizeF(wtOsc.Process()) * 0.63f;
+            DSP_PROF_END(SYNTH_WT);
+            DSP_PROF_SCOPE(SYNTH_ROUTING);
             synthTobus(s, engTrk[SYNTH_ENGINE_WTOSC]);
+            DSP_PROF_END(SYNTH_ROUTING);
         }
         if ((synthActiveMask & (1 << SYNTH_ENGINE_SH101)) && synthSH101.IsActive()){  /* I1 */
-            float s = sanitizeF(synthSH101.Process()) * demoFadeGain * 0.63f;
+            DSP_PROF_SCOPE(SYNTH_SH101);
+            float s = sanitizeF(synthSH101.Process()) * 0.63f;
+            DSP_PROF_END(SYNTH_SH101);
+            DSP_PROF_SCOPE(SYNTH_ROUTING);
             synthTobus(s, engTrk[SYNTH_ENGINE_SH101]);
+            DSP_PROF_END(SYNTH_ROUTING);
         }
         if ((synthActiveMask & (1 << SYNTH_ENGINE_FM2OP)) && synthFM2Op.IsActive()){  /* I2 */
-            float s = sanitizeF(synthFM2Op.Process()) * demoFadeGain * 0.63f;
+            DSP_PROF_SCOPE(SYNTH_FM2OP);
+            float s = sanitizeF(synthFM2Op.Process()) * 0.63f;
+            DSP_PROF_END(SYNTH_FM2OP);
+            DSP_PROF_SCOPE(SYNTH_ROUTING);
             synthTobus(s, engTrk[SYNTH_ENGINE_FM2OP]);
+            DSP_PROF_END(SYNTH_ROUTING);
         }
         if (synthActiveMask & (1 << SYNTH_ENGINE_PHYS)){
+            DSP_PROF_SCOPE(SYNTH_PHYS);
             float s = 0;
             if(physModalActive)  s += sanitizeF(physModal.Process())  * physModalGain;
             if(physStringActive) s += sanitizeF(physString.Process()) * physStringGain;
-            s *= demoFadeGain;
+            DSP_PROF_END(SYNTH_PHYS);
+            DSP_PROF_SCOPE(SYNTH_ROUTING);
             synthTobus(sanitizeF(s), engTrk[SYNTH_ENGINE_PHYS]);
+            DSP_PROF_END(SYNTH_ROUTING);
         }
         if (synthActiveMask & (1 << SYNTH_ENGINE_NOISE)){
             if(noisePartActive){
-                float s = sanitizeF(noisePart.Process()) * noisePartGain * demoFadeGain;
+                DSP_PROF_SCOPE(SYNTH_NOISE);
+                float s = sanitizeF(noisePart.Process()) * noisePartGain;
+                DSP_PROF_END(SYNTH_NOISE);
+                DSP_PROF_SCOPE(SYNTH_ROUTING);
                 synthTobus(sanitizeF(s), engTrk[SYNTH_ENGINE_NOISE]);
+                DSP_PROF_END(SYNTH_ROUTING);
             }
         }
 
@@ -4176,6 +4536,7 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
         }
 
         /* ── MASTER FX CHAIN ── */
+        DSP_PROF_SCOPE(MASTER_FX);
         float gainOut = kForceMasterGainDebug ? 1.0f : masterGain;
         /* Sanitize bus accumulators to catch any NaN from voice/synth processing */
         float L = sanitizeF(busL) * gainOut;
@@ -4375,8 +4736,10 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
                     beatRepRp = (beatRepWp >= beatRepLen) ? (beatRepWp - beatRepLen) : 0;
             }
         }
+        DSP_PROF_END(MASTER_FX);
 
         /* ── Sanitize before final output (kill NaN/Inf from any DSP module) ── */
+        DSP_PROF_SCOPE(OUTPUT);
         L = sanitizeF(L);
         R = sanitizeF(R);
 
@@ -4398,8 +4761,11 @@ void AudioCallback(AudioHandle::InputBuffer  /*in*/,
 
         float pk = fmaxf(fabsf(L), fabsf(R));
         if(pk > mixPeak) mixPeak = pk;
+        DSP_PROF_END(OUTPUT);
     }
     masterPeak = mixPeak;
+    DSP_PROF_END(CALLBACK);
+    DspProfBlockDone();
     audioLoadMeter.OnBlockEnd();
 }
 
@@ -5325,15 +5691,37 @@ static void ProcessCommand()
     case CMD_SAMPLE_BEGIN:
         if(len >= 12){
             uint8_t pad = p[0];
-            if(pad < MAX_PADS){
+            if(pad < TOTAL_SAMPLE_SLOTS){
                 uint32_t ts = 0; memcpy(&ts, p + 8, 4);
-                StopPadVoices(pad);
-                padLoading[pad] = true;
+                if(ts == 0)
+                    break;
                 if(ts > MAX_SAMPLE_BYTES / 2)
                     ts = MAX_SAMPLE_BYTES / 2;
-                sampleTotalSamples[pad] = ts;
-                sampleLength[pad] = 0;
-                sampleLoaded[pad] = false;
+                if(pad < MAX_PADS){
+                    StopPadVoices(pad);
+                    sampleLoaded[pad] = false;
+                    sampleLength[pad] = 0;
+                    sampleTotalSamples[pad] = 0;
+                    if(!AllocSampleStorage(pad, ts)){
+                        padLoading[pad] = false;
+                        break;
+                    }
+                    padLoading[pad] = true;
+                    sampleTotalSamples[pad] = ts;
+                } else {
+                    uint8_t track = (uint8_t)(pad - MAX_PADS);
+                    cleanTrackLoaded[track] = false;
+                    cleanTrackLength[track] = 0;
+                    cleanTrackTotalSamples[track] = 0;
+                    cleanTrackPlayhead[track] = 0;
+                    cleanTrackActive[track] = false;
+                    if(!AllocCleanTrackStorage(track, ts)){
+                        cleanTrackLoading[track] = false;
+                        break;
+                    }
+                    cleanTrackLoading[track] = true;
+                    cleanTrackTotalSamples[track] = ts;
+                }
             }
         }
         break;
@@ -5346,12 +5734,27 @@ static void ProcessCommand()
             memcpy(&offset,    p + 4, 4);
             uint32_t startSample = offset / 2;
             uint16_t numSamples  = chunkSize / 2;
-            if(pad < MAX_PADS && padLoading[pad]
+            if(pad < TOTAL_SAMPLE_SLOTS){
+                int16_t* sampleData = nullptr;
+                bool slotLoading = false;
+                uint32_t slotCapacity = 0;
+                if(pad < MAX_PADS){
+                    sampleData = SamplePtr(pad);
+                    slotLoading = padLoading[pad];
+                    slotCapacity = sampleCapacitySamples[pad];
+                } else {
+                    uint8_t track = (uint8_t)(pad - MAX_PADS);
+                    sampleData = CleanTrackPtr(track);
+                    slotLoading = cleanTrackLoading[track];
+                    slotCapacity = cleanTrackCapacitySamples[track];
+                }
+                if(slotLoading && sampleData != nullptr
                && (chunkSize & 1u) == 0
                && len >= (uint16_t)(8u + chunkSize)
-                    && startSample + numSamples <= MAX_SAMPLE_BYTES / 2){
-                memcpy(&sampleStorage[pad][startSample], p + 8, chunkSize);
+                    && startSample + numSamples <= slotCapacity){
+                    memcpy(&sampleData[startSample], p + 8, chunkSize);
                 }
+            }
         }
         break;
 
@@ -5369,8 +5772,22 @@ static void ProcessCommand()
                 } else {
                     sampleLength[pad] = 0;
                     sampleLoaded[pad] = false;
+                    FreeSampleStorage(pad);
                 }
                 padLoading[pad] = false;
+            } else if(pad >= MAX_PADS && pad < TOTAL_SAMPLE_SLOTS && cleanTrackLoading[pad - MAX_PADS]) {
+                uint8_t track = (uint8_t)(pad - MAX_PADS);
+                if(status == 0 && cleanTrackTotalSamples[track] > 0){
+                    if(cleanTrackTotalSamples[track] > MAX_SAMPLE_BYTES / 2)
+                        cleanTrackTotalSamples[track] = MAX_SAMPLE_BYTES / 2;
+                    cleanTrackLength[track] = cleanTrackTotalSamples[track];
+                    cleanTrackLoaded[track] = true;
+                } else {
+                    cleanTrackLength[track] = 0;
+                    cleanTrackLoaded[track] = false;
+                    FreeCleanTrackStorage(track);
+                }
+                cleanTrackLoading[track] = false;
             }
         }
         break;
@@ -5383,7 +5800,31 @@ static void ProcessCommand()
             sampleLoaded[pad] = false;
             sampleLength[pad] = 0;
             sampleTotalSamples[pad] = 0;
+            FreeSampleStorage(pad);
         }
+        break;
+
+    case CMD_CLEAN_TRACK_ACTIVE:
+        if(len >= 2 && p[0] < CLEAN_TRACK_COUNT){
+            uint8_t track = p[0];
+            cleanTrackEnabled[track] = (p[1] != 0);
+            if(!cleanTrackEnabled[track]){
+                cleanTrackActive[track] = false;
+                cleanTrackPlayhead[track] = 0;
+            } else if(cleanTrackLoaded[track]) {
+                if(dseq.playing) {
+                    cleanTrackPlayhead[track] = 0;
+                    cleanTrackActive[track] = true;
+                } else {
+                    cleanTrackActive[track] = false;
+                }
+            }
+        }
+        break;
+
+    case CMD_CLEAN_TRACK_MUTE:
+        if(len >= 2 && p[0] < CLEAN_TRACK_COUNT)
+            cleanTrackMuted[p[0]] = (p[1] != 0);
         break;
 
     case CMD_SAMPLE_UNLOAD_ALL:
@@ -5392,6 +5833,17 @@ static void ProcessCommand()
             sampleLoaded[i] = false;
             sampleLength[i] = 0;
             sampleTotalSamples[i] = 0;
+        }
+        for(int i = 0; i < CLEAN_TRACK_COUNT; i++){
+            cleanTrackLoading[i] = false;
+            cleanTrackLoaded[i] = false;
+            cleanTrackLength[i] = 0;
+            cleanTrackTotalSamples[i] = 0;
+            cleanTrackPlayhead[i] = 0;
+            cleanTrackActive[i] = false;
+            cleanTrackEnabled[i] = true;
+            cleanTrackMuted[i] = false;
+            FreeCleanTrackStorage((uint8_t)i);
         }
         for(int v = 0; v < MAX_VOICES; v++) voices[v].active = false;
         break;
@@ -5444,7 +5896,27 @@ static void ProcessCommand()
 
             PreparePadRangeForReload(lk.startPad, maxIdx);
 
-            if(sdPresent && f_opendir(&dir, path) == FR_OK){
+            FRESULT openRes = FR_NO_PATH;
+            if(sdPresent)
+                openRes = f_opendir(&dir, path);
+            if(sdPresent && openRes != FR_OK){
+                char rootPath[96];
+                if(JoinPath(rootPath, sizeof(rootPath), "/", lk.kitName)){
+                    FRESULT rootRes = f_opendir(&dir, rootPath);
+                    if(rootRes == FR_OK){
+                        hw.PrintLine("SD: Kit '%s' using root fallback %s", lk.kitName, rootPath);
+                        CopyFixedString(path, sizeof(path), rootPath);
+                        openRes = FR_OK;
+                    } else {
+                        hw.PrintLine("SD: Kit '%s' not found (%s res=%d, %s res=%d)",
+                                     lk.kitName, path, (int)openRes, rootPath, (int)rootRes);
+                    }
+                } else {
+                    hw.PrintLine("SD: Kit '%s' path too long", lk.kitName);
+                }
+            }
+
+            if(sdPresent && openRes == FR_OK){
                 if(canonicalLiveRange){
                     bool padUsed[16] = {};
                     while(f_readdir(&dir, &fno) == FR_OK && fno.fname[0] != 0){
@@ -5486,8 +5958,12 @@ static void ProcessCommand()
                 uint8_t loadedCount = 0;
                 for(int i = lk.startPad; i < maxIdx; i++)
                     if(sampleLoaded[i]) loadedCount++;
+                if(loadedCount == 0)
+                    hw.PrintLine("SD: WARN kit '%s' loaded 0 pads from %s", lk.kitName, path);
                 PushEvent(EVT_SD_KIT_LOADED, loadedCount,
                           mask, lk.kitName);
+            } else if(!sdPresent) {
+                hw.PrintLine("SD: load kit '%s' ignored, SD not present", lk.kitName);
             }
 
             /* ── Clear padLoading for range and unmute audio ── */
@@ -5701,7 +6177,11 @@ static void ProcessCommand()
         resp[55] = (uint8_t)(masterPeak >= 1.0f ? 1 : 0);
         uint16_t ringDrops = spiRingDrops;
         memcpy(resp + 56, &ringDrops, 2);
-        BuildResponse(CMD_GET_STATUS, hdr->sequence, resp, 58);
+        for(int i = 0; i < CLEAN_TRACK_COUNT; i++){
+            if(cleanTrackLoaded[i]) resp[58] |= (1u << i);
+            if(cleanTrackActive[i]) resp[59] |= (1u << i);
+        }
+        BuildResponse(CMD_GET_STATUS, hdr->sequence, resp, 60);
         return;
     }
 
@@ -6353,12 +6833,24 @@ static void ProcessCommand()
                 dseq.samplesElapsed = 0;
                 dseq.currentStep    = -1;
                 dseq.playing        = true;
+                for(int i = 0; i < CLEAN_TRACK_COUNT; i++){
+                    cleanTrackPlayhead[i] = 0;
+                    cleanTrackActive[i] = cleanTrackEnabled[i] && cleanTrackLoaded[i];
+                }
             } else if(p[0] == 0){
                 dseq.playing = false;
+                for(int i = 0; i < CLEAN_TRACK_COUNT; i++){
+                    cleanTrackActive[i] = false;
+                    cleanTrackPlayhead[i] = 0;
+                }
             } else if(p[0] == 2){
                 dseq.playing        = false;
                 dseq.currentStep    = -1;
                 dseq.samplesElapsed = 0;
+                for(int i = 0; i < CLEAN_TRACK_COUNT; i++){
+                    cleanTrackActive[i] = false;
+                    cleanTrackPlayhead[i] = 0;
+                }
             }
         }
         break;
@@ -6797,7 +7289,6 @@ static void UartRxByteCb(void* ctx, UartHandler::Result res)
                 uart_slave.DmaReceive(rxBuf + 8, 1, nullptr, UartRxByteCb, nullptr);
             } else {
                 /* Sin payload — procesar ya */
-                if(demoModeActive){ demoModeActive = false; acid303.NoteOff(); }
                 ProcessCommand();
                 if(!pendingResponse) UartStartScan();
                 else uartRxState = UART_ST_SCAN;
@@ -6813,7 +7304,6 @@ static void UartRxByteCb(void* ctx, UartHandler::Result res)
             break;
         }
         /* Payload completo */
-        if(demoModeActive){ demoModeActive = false; acid303.NoteOff(); }
         ProcessCommand();
         if(!pendingResponse) UartStartScan();
         else uartRxState = UART_ST_SCAN;
@@ -6881,11 +7371,13 @@ static bool LoadWavToPad(const char* filepath, uint8_t padIdx)
     uint32_t dataSize = 0;
     uint32_t bytesPerFrame = 0;
     uint32_t totalFrames = 0;
+    int16_t* sampleData = nullptr;
 
     StopPadVoices(padIdx);
     sampleLoaded[padIdx] = false;
     sampleLength[padIdx] = 0;
     sampleTotalSamples[padIdx] = 0;
+    FreeSampleStorage(padIdx);
     padLoading[padIdx] = true;
 
     if(f_open(&fil, filepath, FA_READ) != FR_OK)
@@ -6932,11 +7424,17 @@ static bool LoadWavToPad(const char* filepath, uint8_t padIdx)
         goto done;
     totalFrames = dataSize / bytesPerFrame;
     if(totalFrames > MAX_SAMPLE_BYTES / 2) totalFrames = MAX_SAMPLE_BYTES / 2;
+    if(!AllocSampleStorage(padIdx, totalFrames))
+        goto done;
+
+    sampleData = SamplePtr(padIdx);
+    if(sampleData == nullptr)
+        goto done;
 
     /* Read and convert to mono 16-bit */
     if(bps == 16 && ch == 1){
         /* Optimal: direct read */
-        if(f_read(&fil, sampleStorage[padIdx], totalFrames * 2, &br) != FR_OK)
+        if(f_read(&fil, sampleData, totalFrames * 2, &br) != FR_OK)
             goto done;
         sampleLength[padIdx] = br / 2;
     } else {
@@ -6965,7 +7463,7 @@ static bool LoadWavToPad(const char* filepath, uint8_t padIdx)
                     sample = ((int32_t)s[0] - 128) * 256;
                     if(ch == 2) sample = (sample + ((int32_t)s[1]-128)*256) / 2;
                 }
-                sampleStorage[padIdx][frames++] =
+                sampleData[frames++] =
                     (int16_t)(sample < -32768 ? -32768 : (sample > 32767 ? 32767 : sample));
             }
         }
@@ -6983,6 +7481,7 @@ done:
         sampleLoaded[padIdx] = false;
         sampleLength[padIdx] = 0;
         sampleTotalSamples[padIdx] = 0;
+        FreeSampleStorage(padIdx);
     }
     padLoading[padIdx] = false;
     if(opened)
@@ -7444,9 +7943,6 @@ static void InitFX()
     startupAnnounceOsc.SetCarrierFreq(100.0f);
     startupAnnounceOsc.SetFormantFreq(900.0f);
     startupAnnounceOsc.SetPhaseShift(0.4f);
-
-    /* ── Demo Mode Init ── */
-    demoSeq.Init(sr, &synth808, &synth909, &acid303);
 }
 
 /* ═══════════════════════════════════════════════════════════════════
@@ -7464,6 +7960,7 @@ int main()
 
     /* ── Hardware init ── */
     hw.Init();
+    DspProfInit();
 
     if(kBootDiagMinimal)
     {
@@ -7507,7 +8004,6 @@ int main()
     Log("  %d pads · %d voices · %d Hz · %d block",
         MAX_PADS, MAX_VOICES, SAMPLE_RATE, AUDIO_BLOCK);
     Log("  Synth: TR808 · TR909 · TR505 · TB303");
-    Log("  DEMO MODE: auto-play 3 min");
     Log("══════════════════════════════════════════");
 
     /* ── Init state ── */
@@ -7578,9 +8074,24 @@ int main()
                 uint32_t totalFrames = dataSize / bytesPerFrame;
                 if(totalFrames > MAX_SAMPLE_BYTES / 2)
                     totalFrames = MAX_SAMPLE_BYTES / 2;
+                FreeSampleStorage(padIdx);
+                if(!AllocSampleStorage(padIdx, totalFrames)){
+                    sampleLength[padIdx] = 0;
+                    sampleTotalSamples[padIdx] = 0;
+                    sampleLoaded[padIdx] = false;
+                    Log("  Pad %2d: sin SDRAM para %lu frames", padIdx, totalFrames);
+                    continue;
+                }
+                int16_t* sampleData = SamplePtr(padIdx);
+                if(sampleData == nullptr){
+                    sampleLength[padIdx] = 0;
+                    sampleTotalSamples[padIdx] = 0;
+                    sampleLoaded[padIdx] = false;
+                    continue;
+                }
                 /* Convertir a mono 16-bit en SDRAM */
                 if(bps == 16 && ch == 1){
-                    memcpy(sampleStorage[padIdx], dataPtr, totalFrames * 2);
+                    memcpy(sampleData, dataPtr, totalFrames * 2);
                     sampleLength[padIdx] = totalFrames;
                 } else {
                     uint32_t frames = 0;
@@ -7601,7 +8112,7 @@ int main()
                             sample = ((int32_t)s[0] - 128) * 256;
                             if(ch == 2) sample = (sample + ((int32_t)s[1]-128)*256) / 2;
                         }
-                        sampleStorage[padIdx][frames++] =
+                        sampleData[frames++] =
                             (int16_t)(sample < -32768 ? -32768 : (sample > 32767 ? 32767 : sample));
                     }
                     sampleLength[padIdx] = frames;
@@ -7752,8 +8263,6 @@ int main()
 
                             spiSlvIsrCnt++;
                             uartLedPulseUntilMs = hw.system.GetNow() + 60;
-                            if(demoModeActive) demoModeActive = false;
-
                             ProcessCommand();
 
                             if(pendingResponse) {
